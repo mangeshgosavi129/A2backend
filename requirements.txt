@@ -86,7 +86,7 @@ platformdirs
 posthog
 proto-plus
 protobuf
-psycopg2
+psycopg2-binary
 py-key-value-aio
 py-key-value-shared
 pyasn1
