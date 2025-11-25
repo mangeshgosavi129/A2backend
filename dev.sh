@@ -22,12 +22,12 @@ uvicorn whatsapp.main:app --port 5050 &
 WHATSAPP_PID=$!
 sleep 3
 
-# Start Frontend on localhost:3000
-echo "Starting Frontend on localhost:3000..."
-cd frontend && npm install --legacy-peer-deps && npm run dev &
-FRONTEND_PID=$!
-cd ..
-sleep 3
+# # Start Frontend on localhost:3000
+# echo "Starting Frontend on localhost:3000..."
+# cd frontend && npm install --legacy-peer-deps && npm run dev &
+# FRONTEND_PID=$!
+# cd ..
+# sleep 3
 
 echo "Starting ngrok tunnels..."
 ngrok start --all --config=ngrok.yml &
