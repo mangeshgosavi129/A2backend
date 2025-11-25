@@ -1,0 +1,12 @@
+version: "3"
+agent:
+    authtoken: 35Qsh6Z4ywIXSxrc6IgMpBplaue_6UmygBXeM7HAzLTNuLehn
+tunnels:
+  whatsapp:
+    addr: 5050
+    proto: http
+    domain: unmilted-dalene-nonexpansile.ngrok-free.dev
+    inspect: false
+  mcp:
+    addr: 8001
+    proto: http
