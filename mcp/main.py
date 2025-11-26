@@ -13,7 +13,7 @@ load_dotenv(dotenv_path=dotenv_path)
 # Configuration
 token = os.getenv("TOKEN")
 print(f"DEBUG: Loaded token from {dotenv_path}: {token[:20] if token else None}...")
-API_BASE = os.getenv("API_BASE", "http://127.0.0.1:8000")
+API_BASE = os.getenv("API_BASE", "https://fastapi.graphsensesolutions.com")
 mcp = FastMCP("urbounce-tasks", port=8001)
 AUTH_HEADER = {
     "Authorization": f"Bearer {token}"

@@ -1,25 +1,24 @@
-# whatsapp/database.py
+# main.py
 from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, DateTime, ForeignKey, Enum as SQLEnum, CheckConstraint
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import Session, sessionmaker, relationship
+from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.dialects.postgresql import JSONB
 from datetime import datetime
 import enum
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
 # =========================================================
 # DATABASE SETUP
 # =========================================================
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres@localhost:5432/taskbot")
-engine = create_engine(DATABASE_URL)
+engine = create_engine(os.getenv("DATABASE_URL"))
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 # =========================================================
-# ENUMS (Duplicated)
+# ENUMS
 # =========================================================
 class TaskStatus(str, enum.Enum):
     assigned = "assigned"
@@ -45,7 +44,7 @@ class MessageChannel(str, enum.Enum):
     system = "system"
 
 # =========================================================
-# DATABASE MODELS (Duplicated)
+# DATABASE MODELS
 # =========================================================
 class User(Base):
     __tablename__ = "users"
