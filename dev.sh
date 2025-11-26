@@ -35,7 +35,7 @@ NGROK_PID=$!
 
 sleep 3
 echo "Fetching MCP ngrok public URL..."
-MCP_URL=$(curl --silent http://127.0.0.1:4040/api/tunnels | grep -o '"public_url":"[^"]*"' | grep https | head -n 1 | cut -d '"' -f4)
+MCP_URL=$(curl --silent http://127.0.0.1:4040/api/tunnels | grep -o '"public_url":"[^"]*"' | grep https | head -n 2 | cut -d '"' -f4)
 echo "MCP available at: $MCP_URL"
 
 # Handle shutdown gracefully
