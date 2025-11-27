@@ -389,7 +389,7 @@ async def get_current_user(
 app = FastAPI(title="Task Management API")
 
 origins = [
-    "https://a2tasks.vercel.app",  # <--- This is the crucial line
+    "https://gsstask.vercel.app",  # <--- This is the crucial line
     "http://localhost:8001",
     "http://localhost:5050",
     "http://localhost",
