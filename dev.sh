@@ -91,10 +91,10 @@ cleanup() {
 }
 
 # Trap SIGINT (Ctrl+C) and SIGTERM (kill) signals
-trap cleanup SIGINT SIGTERM
+# trap cleanup SIGINT SIGTERM
 
 # --- Keep Alive ---
 
-echo "Script is running. Press Ctrl+C to stop all services and tunnel."
+echo "Script is running in background, to kill, use lsof and kill pids"
 # The 'wait' command keeps the main script alive until a trapped signal is received
-wait
+# wait
