@@ -813,7 +813,8 @@ def add_checklist_item(
     
     checklist = task.checklist or []
     checklist.append(item.dict())
-    task.checklist = checklist
+    # CRITICAL FIX: Create a new list to force SQLAlchemy to detect the JSONB change
+    task.checklist = list(checklist)  # Create a copy to trigger dirty flag
     task.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(task)
@@ -839,7 +840,9 @@ def update_checklist_item(
     if update_data.completed is not None:
         checklist[update_data.index]["completed"] = update_data.completed
     
-    task.checklist = checklist
+    # CRITICAL FIX: Create a new list to force SQLAlchemy to detect the JSONB change
+    # Without this, SQLAlchemy won't recognize the mutation and won't persist it
+    task.checklist = list(checklist)  # Create a copy to trigger dirty flag
     task.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(task)
@@ -861,7 +864,8 @@ def remove_checklist_item(
         raise HTTPException(status_code=400, detail="Invalid checklist index")
     
     checklist.pop(remove_data.index)
-    task.checklist = checklist
+    # CRITICAL FIX: Create a new list to force SQLAlchemy to detect the JSONB change
+    task.checklist = list(checklist)  # Create a copy to trigger dirty flag
     task.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(task)
