@@ -7,6 +7,6 @@ mcp
 dotenv 
 passlib 
 requests 
-bcrypt 
+bcrypt == 3.2.0
 pytz 
 openai
