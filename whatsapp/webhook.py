@@ -148,7 +148,7 @@ User clearly agrees (“yes”, “create”, “done”)
 3) COMMIT
 • Call create_task once (and assign_task if assignee not default)
 • Then confirm using actual data from tool response:
-  "Created Task {id}: {title}, Due {date}, Assignee {name}"
+  "Created Task id: title, Due date, Assignee name"
 
 If user abandons the draft and changes topic:
 Ask once if they want to keep or discard. If ignored → discard.
