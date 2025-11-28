@@ -6,6 +6,7 @@ from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, Da
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session, sessionmaker, relationship
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm.attributes import flag_modified
 from pydantic import BaseModel, Field, validator
 from typing import Optional, List
 from datetime import datetime, timedelta
@@ -813,8 +814,8 @@ def add_checklist_item(
     
     checklist = task.checklist or []
     checklist.append(item.dict())
-    # CRITICAL FIX: Create a new list to force SQLAlchemy to detect the JSONB change
-    task.checklist = list(checklist)  # Create a copy to trigger dirty flag
+    task.checklist = checklist
+    flag_modified(task, "checklist")  # Explicitly mark as modified
     task.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(task)
@@ -840,9 +841,8 @@ def update_checklist_item(
     if update_data.completed is not None:
         checklist[update_data.index]["completed"] = update_data.completed
     
-    # CRITICAL FIX: Create a new list to force SQLAlchemy to detect the JSONB change
-    # Without this, SQLAlchemy won't recognize the mutation and won't persist it
-    task.checklist = list(checklist)  # Create a copy to trigger dirty flag
+    task.checklist = checklist
+    flag_modified(task, "checklist")  # Explicitly mark as modified
     task.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(task)
@@ -864,8 +864,8 @@ def remove_checklist_item(
         raise HTTPException(status_code=400, detail="Invalid checklist index")
     
     checklist.pop(remove_data.index)
-    # CRITICAL FIX: Create a new list to force SQLAlchemy to detect the JSONB change
-    task.checklist = list(checklist)  # Create a copy to trigger dirty flag
+    task.checklist = checklist
+    flag_modified(task, "checklist")  # Explicitly mark as modified
     task.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(task)
