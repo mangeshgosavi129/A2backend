@@ -51,15 +51,15 @@ async def update_user(user_id: int, name: Optional[str] = None, department: Opti
         resp.raise_for_status()
         return resp.json()
 
-@mcp.tool()
-async def delete_user(user_id: int):
-    """Delete a user"""
-    async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
-        resp = await client.delete(f"/users/{user_id}")
-        if resp.status_code == 404:
-            return {"error": "User not found", "status": 404}
-        resp.raise_for_status()
-        return {"message": "User deleted successfully"}
+# @mcp.tool()#comment
+# async def delete_user(user_id: int):
+#     """Delete a user"""
+#     async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
+#         resp = await client.delete(f"/users/{user_id}")
+#         if resp.status_code == 404:
+#             return {"error": "User not found", "status": 404}
+#         resp.raise_for_status()
+#         return {"message": "User deleted successfully"}
 
 # =========================================================
 # CLIENT ENDPOINTS
@@ -114,15 +114,15 @@ async def update_client(client_id: int, name: Optional[str] = None, phone: Optio
         resp.raise_for_status()
         return resp.json()
 
-@mcp.tool()
-async def delete_client(client_id: int):
-    """Delete a client"""
-    async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
-        resp = await client.delete(f"/clients/{client_id}")
-        if resp.status_code == 404:
-            return {"error": "Client not found", "status": 404}
-        resp.raise_for_status()
-        return {"message": "Client deleted successfully"}
+# @mcp.tool()#comment
+# async def delete_client(client_id: int):
+#     """Delete a client"""
+#     async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
+#         resp = await client.delete(f"/clients/{client_id}")
+#         if resp.status_code == 404:
+#             return {"error": "Client not found", "status": 404}
+#         resp.raise_for_status()
+#         return {"message": "Client deleted successfully"}
 
 # =========================================================
 # TASK ENDPOINTS
@@ -301,9 +301,6 @@ async def update_checklist_item(task_id: int, index: int, text: Optional[str] = 
 async def remove_checklist_item(task_id: int, index: int):
     """Remove a checklist item by index"""
     async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
-        # Note: Using DELETE method but passing body, which some clients/proxies might strip.
-        # However, httpx supports it. The FastAPI endpoint expects a body.
-        # Standard DELETE requests usually don't have bodies, but FastAPI allows it.
         request = httpx.Request("DELETE", f"{API_BASE}/tasks/{task_id}/checklist/remove", json={"index": index}, headers=AUTH_HEADER)
         resp = await client.send(request)
         
@@ -317,51 +314,52 @@ async def remove_checklist_item(task_id: int, index: int):
 # =========================================================
 # MESSAGE ENDPOINTS
 # =========================================================
-@mcp.tool()
-async def create_message(
-    direction: str,
-    channel: str,
-    user_id: Optional[int] = None,
-    task_id: Optional[int] = None,
-    message_text: Optional[str] = None,
-    payload: Optional[dict] = None
-):
-    """Create a message. Direction: in, out, system. Channel: whatsapp, web, system."""
-    async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
-        resp = await client.post(
-            "/messages",
-            json={
-                "user_id": user_id,
-                "task_id": task_id,
-                "direction": direction,
-                "channel": channel,
-                "message_text": message_text,
-                "payload": payload
-            }
-        )
-        resp.raise_for_status()
-        return resp.json()
 
-@mcp.tool()
-async def list_messages(
-    user_id: Optional[int] = None,
-    task_id: Optional[int] = None,
-    direction: Optional[str] = None,
-    channel: Optional[str] = None
-):
-    """List messages with optional filters"""
-    params = {
-        k: v for k, v in {
-            "user_id": user_id,
-            "task_id": task_id,
-            "direction": direction,
-            "channel": channel
-        }.items() if v is not None
-    }
-    async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
-        resp = await client.get("/messages", params=params)
-        resp.raise_for_status()
-        return resp.json()
+# @mcp.tool()#comment
+# async def create_message(
+#     direction: str,
+#     channel: str,
+#     user_id: Optional[int] = None,
+#     task_id: Optional[int] = None,
+#     message_text: Optional[str] = None,
+#     payload: Optional[dict] = None
+# ):
+#     """Create a message. Direction: in, out, system. Channel: whatsapp, web, system."""
+#     async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
+#         resp = await client.post(
+#             "/messages",
+#             json={
+#                 "user_id": user_id,
+#                 "task_id": task_id,
+#                 "direction": direction,
+#                 "channel": channel,
+#                 "message_text": message_text,
+#                 "payload": payload
+#             }
+#         )
+#         resp.raise_for_status()
+#         return resp.json()
+
+# @mcp.tool()#comment
+# async def list_messages(
+#     user_id: Optional[int] = None,
+#     task_id: Optional[int] = None,
+#     direction: Optional[str] = None,
+#     channel: Optional[str] = None
+# ):
+#     """List messages with optional filters"""
+#     params = {
+#         k: v for k, v in {
+#             "user_id": user_id,
+#             "task_id": task_id,
+#             "direction": direction,
+#             "channel": channel
+#         }.items() if v is not None
+#     }
+#     async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
+#         resp = await client.get("/messages", params=params)
+#         resp.raise_for_status()
+#         return resp.json()
 
 if __name__ == "__main__":
     import sys
