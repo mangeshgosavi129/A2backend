@@ -646,6 +646,36 @@ def update_task(
     task.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(task)
+    
+    # Send WhatsApp notification to all assigned users
+    active_assignees = db.query(TaskAssignee).filter(
+        TaskAssignee.task_id == task_id,
+        TaskAssignee.unassigned_at.is_(None)
+    ).all()
+    
+    if active_assignees:
+        try:
+            from whatsapp.client import send_task_update_notification
+            task_dict = {
+                "id": task.id,
+                "title": task.title,
+                "description": task.description,
+                "status": task.status.value if task.status else "N/A",
+                "priority": task.priority.value if task.priority else "medium",
+                "deadline": task.deadline.strftime("%Y-%m-%d %H:%M") if task.deadline else None
+            }
+            
+            for assignee in active_assignees:
+                user = assignee.user
+                if user and user.phone:
+                    result, status_code = send_task_update_notification(user.phone, task_dict)
+                    if status_code == 200:
+                        logging.info(f"✅ WhatsApp update notification sent to {user.name} ({user.phone}) for task {task.id}")
+                    else:
+                        logging.error(f"❌ WhatsApp update notification failed for {user.name}: {result}")
+        except Exception as e:
+            logging.error(f"Failed to send task update notification: {e}")
+    
     return task
 
 @app.post("/tasks/{task_id}/cancel", response_model=TaskResponse)
@@ -659,11 +689,39 @@ def cancel_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
+    # Get active assignees before cancelling
+    active_assignees = db.query(TaskAssignee).filter(
+        TaskAssignee.task_id == task_id,
+        TaskAssignee.unassigned_at.is_(None)
+    ).all()
+    
     task.status = TaskStatus.cancelled
     task.cancellation_reason = cancel_data.cancellation_reason
     task.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(task)
+    
+    # Send WhatsApp notification to all assigned users
+    if active_assignees:
+        try:
+            from whatsapp.client import send_task_cancellation_notification
+            task_dict = {
+                "id": task.id,
+                "title": task.title,
+                "cancellation_reason": task.cancellation_reason
+            }
+            
+            for assignee in active_assignees:
+                user = assignee.user
+                if user and user.phone:
+                    result, status_code = send_task_cancellation_notification(user.phone, task_dict)
+                    if status_code == 200:
+                        logging.info(f"✅ WhatsApp cancellation notification sent to {user.name} ({user.phone}) for task {task.id}")
+                    else:
+                        logging.error(f"❌ WhatsApp cancellation notification failed for {user.name}: {result}")
+        except Exception as e:
+            logging.error(f"Failed to send task cancellation notification: {e}")
+    
     return task
 
 # =========================================================
