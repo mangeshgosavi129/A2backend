@@ -155,7 +155,9 @@ async def create_task(
     deadline: Optional[str] = None,
     progress_percentage: int = 0
 ):
-    """Create task. Returns task_id - STORE IT! Use update_task() to modify, NOT create_task again.
+    """Create task ONCE with ALL info ready. NEVER call twice for same task.
+    CRITICAL: If assignee mentioned, resolve user_id via list_users() BEFORE calling this.
+    After creation, use assign_task() to add assignees, NOT create_task again.
     Status: assigned|in_progress|on_hold|completed|cancelled|overdue. Priority: high|medium|low"""
     try:
         # Filter out None values to prevent null validation errors
@@ -356,7 +358,7 @@ async def cancel_task(task_id: int, cancellation_reason: str):
 # =========================================================
 @mcp.tool()
 async def assign_task(task_id: int, user_id: int):
-    """Assign user to task. Idempotent (safe to retry)."""
+    """Assign user to EXISTING task (use after create_task). To add assignee during creation, first call list_users() to get user_id, then include in create_task workflow. Idempotent."""
     try:
         async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
             resp = await client.post(
