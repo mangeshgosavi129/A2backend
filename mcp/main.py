@@ -20,6 +20,24 @@ AUTH_HEADER = {
 }
 
 # =========================================================
+# HELPER FUNCTION: Response Wrapper
+# =========================================================
+def mcp_response(success: bool, data: dict, instructions: str = "", error: str = None):
+    """
+    Standardized response format for all MCP tools.
+    This helps the LLM understand what to do with the response.
+    """
+    response = {
+        "success": success,
+        "data": data if success else {},
+    }
+    if instructions:
+        response["instructions"] = instructions
+    if error:
+        response["error"] = error
+    return response
+
+# =========================================================
 # USER ENDPOINTS
 # =========================================================
 @mcp.tool()
@@ -137,11 +155,12 @@ async def create_task(
     deadline: Optional[str] = None,
     progress_percentage: int = 0
 ):
-    """Create a task. Status: assigned, in_progress, on_hold, completed, cancelled, overdue. Priority: high, medium, low."""
-    async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
-        resp = await client.post(
-            "/tasks",
-            json={
+    """Create task. Returns task_id - STORE IT! Use update_task() to modify, NOT create_task again.
+    Status: assigned|in_progress|on_hold|completed|cancelled|overdue. Priority: high|medium|low"""
+    try:
+        # Filter out None values to prevent null validation errors
+        payload = {
+            k: v for k, v in {
                 "client_id": client_id,
                 "title": title,
                 "description": description,
@@ -149,28 +168,88 @@ async def create_task(
                 "priority": priority,
                 "deadline": deadline,
                 "progress_percentage": progress_percentage
-            },
+            }.items() if v is not None
+        }
+        
+        async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
+            resp = await client.post("/tasks", json=payload)
+            resp.raise_for_status()
+            task_data = resp.json()
+            
+            # Return structured response with explicit instructions
+            return mcp_response(
+                success=True,
+                data=task_data,
+                instructions=f"✓ Created. Store task_id={task_data['id']}. Use update_task(task_id={task_data['id']}) to modify."
+            )
+    except httpx.HTTPStatusError as e:
+        return mcp_response(
+            success=False,
+            data={},
+            error=f"HTTP {e.response.status_code}: {e.response.text}"
         )
-        resp.raise_for_status()
-        return resp.json()
+    except Exception as e:
+        return mcp_response(
+            success=False,
+            data={},
+            error=f"Error creating task: {str(e)}"
+        )
 
 @mcp.tool()
 async def list_tasks():
-    """List all tasks"""
-    async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
-        resp = await client.get("/tasks")
-        resp.raise_for_status()
-        return resp.json()
+    """List all tasks. Each has 'id' for use with update_task, get_task, assign_task, etc."""
+    try:
+        async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
+            resp = await client.get("/tasks")
+            resp.raise_for_status()
+            tasks_data = resp.json()
+            
+            return mcp_response(
+                success=True,
+                data={"tasks": tasks_data, "count": len(tasks_data)},
+                instructions=f"Found {len(tasks_data)} tasks"
+            )
+    except Exception as e:
+        return mcp_response(
+            success=False,
+            data={},
+            error=f"Error listing tasks: {str(e)}"
+        )
 
 @mcp.tool()
 async def get_task(task_id: int):
-    """Get a task by ID"""
-    async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
-        resp = await client.get(f"/tasks/{task_id}")
-        if resp.status_code == 404:
-            return {"error": "Task not found", "status": 404}
-        resp.raise_for_status()
-        return resp.json()
+    """Get task by ID"""
+    try:
+        async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
+            resp = await client.get(f"/tasks/{task_id}")
+            
+            if resp.status_code == 404:
+                return mcp_response(
+                    success=False,
+                    data={},
+                    error=f"Task {task_id} not found"
+                )
+            
+            resp.raise_for_status()
+            task_data = resp.json()
+            
+            return mcp_response(
+                success=True,
+                data=task_data,
+                instructions=f"Retrieved task {task_id}"
+            )
+    except httpx.HTTPStatusError as e:
+        return mcp_response(
+            success=False,
+            data={},
+            error=f"HTTP {e.response.status_code}: {e.response.text}"
+        )
+    except Exception as e:
+        return mcp_response(
+            success=False,
+            data={},
+            error=f"Error getting task: {str(e)}"
+        )
 
 @mcp.tool()
 async def update_task(
@@ -184,100 +263,242 @@ async def update_task(
     progress_description: Optional[str] = None,
     progress_percentage: Optional[int] = None
 ):
-    """Update a task"""
-    payload = {
-        k: v
-        for k, v in {
-            "title": title,
-            "description": description,
-            "status": status,
-            "priority": priority,
-            "deadline": deadline,
-            "end_datetime": end_datetime,
-            "progress_description": progress_description,
-            "progress_percentage": progress_percentage
-        }.items()
-        if v is not None
-    }
-    async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
-        resp = await client.put(f"/tasks/{task_id}", json=payload)
-        if resp.status_code == 404:
-            return {"error": "Task not found", "status": 404}
-        resp.raise_for_status()
-        return resp.json()
+    """Update EXISTING task. ONLY way to modify - don't use create_task again (creates duplicate).
+    Status: assigned|in_progress|on_hold|completed|cancelled|overdue. Priority: high|medium|low"""
+    try:
+        # Filter out None values - already correct
+        payload = {
+            k: v
+            for k, v in {
+                "title": title,
+                "description": description,
+                "status": status,
+                "priority": priority,
+                "deadline": deadline,
+                "end_datetime": end_datetime,
+                "progress_description": progress_description,
+                "progress_percentage": progress_percentage
+            }.items()
+            if v is not None
+        }
+        
+        async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
+            resp = await client.put(f"/tasks/{task_id}", json=payload)
+            
+            if resp.status_code == 404:
+                return mcp_response(
+                    success=False,
+                    data={},
+                    error=f"Task {task_id} not found. Verify you're using the correct task_id from create_task response."
+                )
+            
+            resp.raise_for_status()
+            task_data = resp.json()
+            
+            return mcp_response(
+                success=True,
+                data=task_data,
+                instructions=f"✓ Updated task {task_id}"
+            )
+    except httpx.HTTPStatusError as e:
+        return mcp_response(
+            success=False,
+            data={},
+            error=f"HTTP {e.response.status_code}: {e.response.text}"
+        )
+    except Exception as e:
+        return mcp_response(
+            success=False,
+            data={},
+            error=f"Error updating task: {str(e)}"
+        )
 
 @mcp.tool()
 async def cancel_task(task_id: int, cancellation_reason: str):
-    """Cancel a task"""
-    async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
-        resp = await client.post(
-            f"/tasks/{task_id}/cancel",
-            json={"cancellation_reason": cancellation_reason}
+    """Cancel task with reason"""
+    try:
+        async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
+            resp = await client.post(
+                f"/tasks/{task_id}/cancel",
+                json={"cancellation_reason": cancellation_reason}
+            )
+            
+            if resp.status_code == 404:
+                return mcp_response(
+                    success=False,
+                    data={},
+                    error=f"Task {task_id} not found"
+                )
+            
+            resp.raise_for_status()
+            task_data = resp.json()
+            
+            return mcp_response(
+                success=True,
+                data=task_data,
+                instructions=f"✓ Cancelled {task_id}"
+            )
+    except httpx.HTTPStatusError as e:
+        return mcp_response(
+            success=False,
+            data={},
+            error=f"HTTP {e.response.status_code}: {e.response.text}"
         )
-        if resp.status_code == 404:
-            return {"error": "Task not found", "status": 404}
-        resp.raise_for_status()
-        return resp.json()
+    except Exception as e:
+        return mcp_response(
+            success=False,
+            data={},
+            error=f"Error cancelling task: {str(e)}"
+        )
 
 # =========================================================
 # TASK ASSIGNMENT ENDPOINTS
 # =========================================================
 @mcp.tool()
 async def assign_task(task_id: int, user_id: int):
-    """Assign a task to a user"""
-    async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
-        resp = await client.post(
-            f"/tasks/{task_id}/assign",
-            json={"user_id": user_id}
+    """Assign user to task. Idempotent (safe to retry)."""
+    try:
+        async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
+            resp = await client.post(
+                f"/tasks/{task_id}/assign",
+                json={"user_id": user_id}
+            )
+            
+            if resp.status_code == 404:
+                return mcp_response(
+                    success=False,
+                    data={},
+                    error="Task or User not found. Verify task_id and user_id are correct."
+                )
+            
+            if resp.status_code == 400:
+                # Note: Current backend returns 400 if already assigned in some cases
+                # But according to server code, it's being made idempotent
+                return mcp_response(
+                    success=False,
+                    data={},
+                    error="User already assigned to this task."
+                )
+            
+            resp.raise_for_status()
+            result = resp.json()
+            
+            return mcp_response(
+                success=True,
+                data=result,
+                instructions=f"✓ Assigned"
+            )
+    except httpx.HTTPStatusError as e:
+        return mcp_response(
+            success=False,
+            data={},
+            error=f"HTTP {e.response.status_code}: {e.response.text}"
         )
-        if resp.status_code == 404:
-            return {"error": "Task or User not found", "status": 404}
-        if resp.status_code == 400:
-            return {"error": "User already assigned", "status": 400}
-        resp.raise_for_status()
-        return resp.json()
+    except Exception as e:
+        return mcp_response(
+            success=False,
+            data={},
+            error=f"Error assigning task: {str(e)}"
+        )
 
 @mcp.tool()
 async def assign_task_multiple(task_id: int, user_ids: List[int]):
-    """Assign a task to multiple users"""
-    async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
-        resp = await client.post(
-            f"/tasks/{task_id}/assign-multiple",
-            json={"user_ids": user_ids}
+    """Assign task to multiple users"""
+    try:
+        async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
+            resp = await client.post(
+                f"/tasks/{task_id}/assign-multiple",
+                json={"user_ids": user_ids}
+            )
+            
+            if resp.status_code == 404:
+                return mcp_response(
+                    success=False,
+                    data={},
+                    error="Task not found"
+                )
+            
+            resp.raise_for_status()
+            result = resp.json()
+            
+            return mcp_response(
+                success=True,
+                data=result,
+                instructions=f"✓ Assigned {len(user_ids)} users"
+            )
+    except Exception as e:
+        return mcp_response(
+            success=False,
+            data={},
+            error=f"Error assigning multiple users: {str(e)}"
         )
-        if resp.status_code == 404:
-            return {"error": "Task not found", "status": 404}
-        resp.raise_for_status()
-        return resp.json()
 
 @mcp.tool()
 async def unassign_task(task_id: int, user_id: int):
-    """Unassign a user from a task"""
-    async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
-        resp = await client.post(
-            f"/tasks/{task_id}/unassign",
-            json={"user_id": user_id}
+    """Unassign user from task"""
+    try:
+        async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
+            resp = await client.post(
+                f"/tasks/{task_id}/unassign",
+                json={"user_id": user_id}
+            )
+            
+            if resp.status_code == 404:
+                return mcp_response(
+                    success=False,
+                    data={},
+                    error="Assignment not found"
+                )
+            
+            resp.raise_for_status()
+            result = resp.json()
+            
+            return mcp_response(
+                success=True,
+                data=result,
+                instructions=f"✓ Unassigned"
+            )
+    except Exception as e:
+        return mcp_response(
+            success=False,
+            data={},
+            error=f"Error unassigning user: {str(e)}"
         )
-        if resp.status_code == 404:
-            return {"error": "Assignment not found", "status": 404}
-        resp.raise_for_status()
-        return resp.json()
 
 # =========================================================
 # CHECKLIST ENDPOINTS
 # =========================================================
 @mcp.tool()
 async def add_checklist_item(task_id: int, text: str, completed: bool = False):
-    """Add an item to the task's checklist"""
-    async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
-        resp = await client.post(
-            f"/tasks/{task_id}/checklist/add",
-            json={"text": text, "completed": completed}
+    """Add checklist item to task"""
+    try:
+        async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
+            resp = await client.post(
+                f"/tasks/{task_id}/checklist/add",
+                json={"text": text, "completed": completed}
+            )
+            
+            if resp.status_code == 404:
+                return mcp_response(
+                    success=False,
+                    data={},
+                    error="Task not found"
+                )
+            
+            resp.raise_for_status()
+            task_data = resp.json()
+            
+            return mcp_response(
+                success=True,
+                data=task_data,
+                instructions=f"✓ Item added"
+            )
+    except Exception as e:
+        return mcp_response(
+            success=False,
+            data={},
+            error=f"Error adding checklist item: {str(e)}"
         )
-        if resp.status_code == 404:
-            return {"error": "Task not found", "status": 404}
-        resp.raise_for_status()
-        return resp.json()
 
 @mcp.tool()
 async def update_checklist_item(task_id: int, index: int, text: Optional[str] = None, completed: Optional[bool] = None):
