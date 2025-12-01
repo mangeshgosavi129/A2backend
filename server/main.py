@@ -604,6 +604,18 @@ def create_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    # Deduplication check: Prevent duplicate tasks within 30 seconds
+    cutoff_time = datetime.utcnow() - timedelta(seconds=30)
+    existing_task = db.query(Task).filter(
+        Task.title == task_data.title,
+        Task.created_by == current_user.id,
+        Task.created_at >= cutoff_time
+    ).first()
+
+    if existing_task:
+        logging.info(f"Deduplicated task creation for user {current_user.id}: {task_data.title}")
+        return existing_task
+
     task = Task(**task_data.dict(), created_by=current_user.id)
     db.add(task)
     db.commit()
