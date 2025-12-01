@@ -132,6 +132,31 @@ async def create_task(
     title: str, 
     client_id: Optional[int] = None,
     description: Optional[str] = None, 
+    status: str = "assigned",
+    priority: str = "medium",
+    deadline: Optional[str] = None,
+    progress_percentage: int = 0
+):
+    """Create a task. Status: assigned, in_progress, on_hold, completed, cancelled, overdue. Priority: high, medium, low."""
+    async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
+        resp = await client.post(
+            "/tasks",
+            json={
+                "client_id": client_id,
+                "title": title,
+                "description": description,
+                "status": status,
+                "priority": priority,
+                "deadline": deadline,
+                "progress_percentage": progress_percentage
+            },
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+@mcp.tool()
+async def list_tasks():
+    """List all tasks"""
     async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
         resp = await client.get("/tasks")
         resp.raise_for_status()
