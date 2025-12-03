@@ -17,11 +17,12 @@ def chat_with_mcp(prompt: str, history: List[dict] = [], system_instruction: str
         content = msg.get("content", "")
         history_str += f"{role}: {content}\n"
 
-    final_prompt = f"System: {system_instruction}\n\nHistory:\n{history_str}\n\nUser: {prompt}\n\nAssistant:"
+    final_prompt = f"History:\n{history_str}\n\nUser: {prompt}"
 
     kwargs = dict(
         model="openai/gpt-oss-20b",
         input=final_prompt,
+        instructions=system_instruction,
         tools=[
             {
                 "type": "mcp",
