@@ -608,7 +608,12 @@ def create_task(
     cutoff_time = datetime.utcnow() - timedelta(seconds=30)
     existing_task = db.query(Task).filter(
         Task.title == task_data.title,
+        Task.description == task_data.description,
         Task.created_by == current_user.id,
+        Task.deadline == task_data.deadline,
+        Task.assigned_to == task_data.assigned_to,
+        Task.priority == task_data.priority,
+        Task.status == task_data.status,
         Task.created_at >= cutoff_time
     ).first()
 
