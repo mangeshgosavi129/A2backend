@@ -256,7 +256,7 @@ async def create_and_assign_task(
 
 @mcp.tool()
 async def list_tasks():
-    """List all tasks. Each has 'id' for use with update_task, get_task, assign_task, etc."""
+    """List all tasks. Cancelled tasks are excluded (soft deleted). Each task has 'id' for use with update_task, get_task, assign_task, etc."""
     try:
         async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
             resp = await client.get("/tasks")
@@ -277,7 +277,7 @@ async def list_tasks():
 
 @mcp.tool()
 async def get_task(task_id: int):
-    """Get task by ID"""
+    """Get task by ID. Cancelled tasks are treated as soft deleted and will return 404."""
     try:
         async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
             resp = await client.get(f"/tasks/{task_id}")
@@ -324,7 +324,8 @@ async def update_task(
     progress_description: Optional[str] = None,
     progress_percentage: Optional[int] = None
 ):
-    """Use to update an existing task. Use in scenarios where either a task is created without sufficient details and user adds them in successive messages or user simply wants to modify an existing task.
+    """Use to update an existing task. Cancelled tasks cannot be updated (soft deleted).
+    Use in scenarios where either a task is created without sufficient details and user adds them in successive messages or user simply wants to modify an existing task.
     Status: assigned|in_progress|on_hold|completed|cancelled|overdue. Priority: high|medium|low"""
     try:
         # Filter out None values - already correct
@@ -351,6 +352,13 @@ async def update_task(
                     success=False,
                     data={},
                     error=f"Task {task_id} not found. Verify you're using the correct task_id from create_task response."
+                )
+            
+            if resp.status_code == 403:
+                return mcp_response(
+                    success=False,
+                    data={},
+                    error=f"Task {task_id} cannot be updated. It may have been cancelled."
                 )
             
             resp.raise_for_status()

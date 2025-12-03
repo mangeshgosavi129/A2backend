@@ -627,7 +627,8 @@ def get_tasks(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    tasks = db.query(Task).all()
+    # Exclude cancelled tasks (soft delete)
+    tasks = db.query(Task).filter(Task.status != TaskStatus.cancelled).all()
     return tasks
 
 @app.get("/tasks/{task_id}", response_model=TaskResponse)
@@ -638,6 +639,9 @@ def get_task(
 ):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    # Treat cancelled tasks as soft deleted
+    if task.status == TaskStatus.cancelled:
         raise HTTPException(status_code=404, detail="Task not found")
     return task
 
@@ -651,6 +655,10 @@ def update_task(
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Prevent updates to cancelled tasks (soft delete)
+    if task.status == TaskStatus.cancelled:
+        raise HTTPException(status_code=403, detail="Cannot update cancelled task")
     
     for key, value in task_data.dict(exclude_unset=True).items():
         setattr(task, key, value)
@@ -750,6 +758,10 @@ def assign_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
+    # Prevent operations on cancelled tasks
+    if task.status == TaskStatus.cancelled:
+        raise HTTPException(status_code=403, detail="Cannot modify cancelled task")
+    
     user = db.query(User).filter(User.id == assign_data.user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -801,6 +813,10 @@ def assign_task_multiple(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
+    # Prevent operations on cancelled tasks
+    if task.status == TaskStatus.cancelled:
+        raise HTTPException(status_code=403, detail="Cannot modify cancelled task")
+    
     for user_id in assign_data.user_ids:
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
@@ -841,6 +857,13 @@ def unassign_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    # Check if task exists and is not cancelled
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.status == TaskStatus.cancelled:
+        raise HTTPException(status_code=403, detail="Cannot modify cancelled task")
+    
     assignment = db.query(TaskAssignee).filter(
         TaskAssignee.task_id == task_id,
         TaskAssignee.user_id == unassign_data.user_id,
@@ -864,6 +887,10 @@ def get_task_assignments(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
+    # Prevent operations on cancelled tasks
+    if task.status == TaskStatus.cancelled:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
     # Filter for active assignments (where unassigned_at is None)
     active_assignees = [a for a in task.assignees if a.unassigned_at is None]
     return active_assignees
@@ -881,6 +908,10 @@ def add_checklist_item(
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Prevent operations on cancelled tasks
+    if task.status == TaskStatus.cancelled:
+        raise HTTPException(status_code=403, detail="Cannot modify cancelled task")
     
     checklist = task.checklist or []
     checklist.append(item.dict())
@@ -901,6 +932,10 @@ def update_checklist_item(
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Prevent operations on cancelled tasks
+    if task.status == TaskStatus.cancelled:
+        raise HTTPException(status_code=403, detail="Cannot modify cancelled task")
     
     checklist = task.checklist or []
     if update_data.index >= len(checklist):
@@ -928,6 +963,10 @@ def remove_checklist_item(
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Prevent operations on cancelled tasks
+    if task.status == TaskStatus.cancelled:
+        raise HTTPException(status_code=403, detail="Cannot modify cancelled task")
     
     checklist = task.checklist or []
     if remove_data.index >= len(checklist):
