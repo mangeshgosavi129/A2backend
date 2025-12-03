@@ -665,7 +665,23 @@ def update_task(
     if task.status == TaskStatus.cancelled:
         raise HTTPException(status_code=403, detail="Cannot update cancelled task")
     
-    for key, value in task_data.dict(exclude_unset=True).items():
+    # Deduplication check: If the update requests no changes to the current state, return early
+    # This prevents redundant notifications and DB writes
+    changes_detected = False
+    update_data = task_data.dict(exclude_unset=True)
+    
+    for key, value in update_data.items():
+        current_value = getattr(task, key)
+        # Handle enum comparisons and other types robustly
+        if current_value != value:
+            changes_detected = True
+            break
+    
+    if not changes_detected and update_data:
+        logging.info(f"Deduplicated task update for task {task_id}: No changes detected")
+        return task
+
+    for key, value in update_data.items():
         setattr(task, key, value)
     
     task.updated_at = datetime.utcnow()
@@ -713,6 +729,11 @@ def cancel_task(
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Deduplication check: If already cancelled, return success immediately
+    if task.status == TaskStatus.cancelled:
+        logging.info(f"Deduplicated task cancellation for task {task_id}: Already cancelled")
+        return task
     
     # Get active assignees before cancelling
     active_assignees = db.query(TaskAssignee).filter(
