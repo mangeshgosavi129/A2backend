@@ -7,6 +7,7 @@ import pytz
 from typing import Mapping, Optional, Tuple, List
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
+import threading
 from .security import validate_signature
 from .config import WhatsAppConfig
 from .client import send_whatsapp_text
@@ -99,6 +100,7 @@ def transcribe_audio(audio_binary: bytes) -> str:
         return result.get("transcript", "")
     except Exception as e:
         logger.error(f"Transcription failed: {e}")
+        print("Transcription failed: ", e)
         return "Error: Could not transcribe audio."
 
 def _generate_response(user_id: int, text: str, db: Session) -> str:
@@ -212,6 +214,68 @@ When user refers to task vaguely:
         logger.error(f"LLM Generation failed: {e}")
         return "⚠️ AI Error: I couldn't process that."
 
+def process_audio_async(
+    sender_waid: str,
+    audio_binary: bytes,
+    user_id: int,
+    whatsapp_id: str,
+    current_state: dict,
+    config: WhatsAppConfig
+):
+    """
+    Process audio transcription and LLM response in background thread.
+    This prevents webhook timeout for long audio messages.
+    """
+    db = SessionLocal()
+    try:
+        # Transcribe audio
+        logger.info("Starting audio transcription in background...")
+        text_body = transcribe_audio(audio_binary)
+        logger.info(f"Transcribed: {text_body}")
+        
+        if text_body.startswith("Error:"):
+            # Transcription failed
+            send_whatsapp_text(sender_waid, text_body, config=config)
+            return
+        
+        # Persist incoming message
+        new_msg_in = Message(
+            user_id=user_id,
+            direction=MessageDirection.in_dir,
+            channel=MessageChannel.whatsapp,
+            message_text=text_body,
+            user_state=current_state,
+            payload={"whatsapp_id": whatsapp_id, "source": "audio"}
+        )
+        db.add(new_msg_in)
+        db.commit()
+        
+        # Generate response
+        reply = _generate_response(user_id, text_body, db)
+        logger.info(f"Generated response: {reply}")
+        
+        # Persist outgoing message
+        new_msg_out = Message(
+            user_id=user_id,
+            direction=MessageDirection.out,
+            channel=MessageChannel.whatsapp,
+            message_text=reply,
+            user_state={"state": "idle"}
+        )
+        db.add(new_msg_out)
+        db.commit()
+        
+        # Send response to user
+        send_whatsapp_text(sender_waid, reply, config=config)
+        logger.info("Audio processing complete and response sent.")
+        
+    except Exception as e:
+        logger.error(f"Error in async audio processing: {e}", exc_info=True)
+        error_msg = "⚠️ Sorry, I encountered an error processing your audio message."
+        send_whatsapp_text(sender_waid, error_msg, config=config)
+    finally:
+        db.close()
+
 def handle_webhook(
     body: Mapping,
     headers: Mapping[str, str],
@@ -267,13 +331,34 @@ def handle_webhook(
             logger.info("Received audio message")
             audio_id = msg["audio"]["id"]
             audio_binary = download_whatsapp_media(audio_id, cfg.ACCESS_TOKEN)
-            if audio_binary:
-                text_body = transcribe_audio(audio_binary)
-                logger.info(f"Transcribed: {text_body}")
-                # Notify user of transcription (optional, but good UX)
-                # send_whatsapp_text(sender_waid, f"🎤 Transcribed: {text_body}", config=cfg)
-            else:
+            
+            if not audio_binary:
                 text_body = "Error: Could not download audio."
+                # Process error immediately
+            else:
+                # Send immediate acknowledgment
+                send_whatsapp_text(sender_waid, "🎤 Processing your audio message...", config=cfg)
+                
+                # Get user for async processing
+                user = get_user_by_phone(db, sender_waid)
+                if user:
+                    user_id = user.id
+                    current_state = get_last_state(db, user_id)
+                    
+                    # Process audio in background thread to avoid webhook timeout
+                    thread = threading.Thread(
+                        target=process_audio_async,
+                        args=(sender_waid, audio_binary, user_id, whatsapp_id, current_state, cfg),
+                        daemon=True
+                    )
+                    thread.start()
+                    logger.info("Audio processing started in background thread")
+                    
+                    # Return immediately to avoid webhook timeout
+                    return {"status": "processing"}, 200
+                else:
+                    text_body = "Welcome! I don't recognize this phone number. Please contact support to register."
+                    # Will be processed below
 
         if text_body:
             logger.info(f"Received from {sender_waid}: {text_body}")

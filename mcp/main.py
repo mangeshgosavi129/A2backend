@@ -151,24 +151,25 @@ async def create_and_assign_task(
     assignee_user_id: int,
     client_id: Optional[int] = None,
     description: Optional[str] = None,
-    status: str = "assigned",
-    priority: str = "medium",
+    status: Optional[str] = None,
+    priority: Optional[str] = None,
     deadline: Optional[str] = None,
-    progress_percentage: int = 0
+    progress_percentage: Optional[int] = None
 ):
     """Create task AND assign to user in ONE operation. Use this when assignee is known. If assignee's user_id is unknown, use list_users() to get the id, then use that as assignee_user_id in this tool.
-    Status: assigned|in_progress|on_hold|completed|cancelled|overdue. Priority: high|medium|low"""
+    Status: assigned|in_progress|on_hold|completed|cancelled|overdue. Priority: high|medium|low
+    All optional parameters have sensible defaults if not provided."""
     try:
-        # Step 1: Filter null values and create task
+        # Step 1: Apply defaults and filter null values
         payload = {
             k: v for k, v in {
                 "client_id": client_id,
                 "title": title,
                 "description": description,
-                "status": status,
-                "priority": priority,
+                "status": status or "assigned",  # Default to assigned
+                "priority": priority or "medium",  # Default to medium
                 "deadline": deadline,
-                "progress_percentage": progress_percentage
+                "progress_percentage": progress_percentage if progress_percentage is not None else 0  # Default to 0
             }.items() if v is not None
         }
         
@@ -665,13 +666,3 @@ if __name__ == "__main__":
     else:
         # Run as stdio (default for Claude Desktop)
         mcp.run()
-#             "user_id": user_id,
-#             "task_id": task_id,
-#             "direction": direction,
-#             "channel": channel
-#         }.items() if v is not None
-#     }
-#     async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
-#         resp = await client.get("/messages", params=params)
-#         resp.raise_for_status()
-#         return resp.json()
