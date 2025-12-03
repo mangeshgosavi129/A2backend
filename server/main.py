@@ -611,7 +611,7 @@ def create_task(
         Task.description == task_data.description,
         Task.created_by == current_user.id,
         Task.deadline == task_data.deadline,
-        Task.assigned_to == task_data.assigned_to,
+        # Note: assigned_to is NOT in Task model - assignments are in TaskAssignee table
         Task.priority == task_data.priority,
         Task.status == task_data.status,
         Task.created_at >= cutoff_time
