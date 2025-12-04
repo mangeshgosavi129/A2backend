@@ -12,6 +12,7 @@ from .security import validate_signature
 from .config import WhatsAppConfig
 from .client import send_whatsapp_text
 from .database import SessionLocal, User, Message, MessageDirection, MessageChannel
+from sarvamai import SarvamAI
 # Assuming this import exists in your project
 from llm.main import chat_with_mcp
 
@@ -76,18 +77,30 @@ def download_whatsapp_media(media_id: str, access_token: str) -> Optional[bytes]
         return None
 
 def transcribe_sarvam_audio(audio_binary: bytes) -> str:
+    """Transcribe audio using Sarvam AI API with automatic batch processing fallback.
+    
+    For audio ≤30 seconds: Uses REST API
+    For audio >30 seconds: Falls back to batch processing API
+    
+    Args:
+        audio_binary: Audio file binary data in OGG format from WhatsApp
+        
+    Returns:
+        Transcribed text or error message
+    """
+    import tempfile
+    
     api_key = os.getenv("SARVAM_API_KEY")
     if not api_key:
         logger.error("SARVAM_API_KEY not set")
         return "Error: Transcription service not configured."
-        
+
+    # First, try the REST API (works for audio ≤30 seconds)
     url = "https://api.sarvam.ai/speech-to-text"
     headers = {"api-subscription-key": api_key}
     
-    # Sarvam expects a file upload. We can send the binary as a file.
-    # The model 'saarika:v2.5' is default or specified.
     files = {
-        'file': ('audio.ogg', audio_binary, 'audio/ogg') # WhatsApp usually sends OGG
+        'file': ('audio.ogg', audio_binary, 'audio/ogg')
     }
     data = {
         'model': 'saarika:v2.5'
@@ -97,10 +110,113 @@ def transcribe_sarvam_audio(audio_binary: bytes) -> str:
         resp = requests.post(url, headers=headers, files=files, data=data)
         resp.raise_for_status()
         result = resp.json()
-        return result.get("transcript", "")
+        transcript = result.get("transcript", "")
+        logger.info("Sarvam REST API transcription successful")
+        return transcript
+    except requests.exceptions.HTTPError as http_err:
+        # If REST API fails (likely due to >30 second audio), fall back to batch processing
+        logger.warning(f"REST API failed (likely audio >30s): {http_err}. Falling back to batch processing...")
+        
+        temp_audio_file = None
+        temp_output_dir = None
+        
+        try:
+            # Save audio binary to a temporary file for batch upload
+            with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as temp_file:
+                temp_file.write(audio_binary)
+                temp_audio_file = temp_file.name
+            
+            logger.info(f"Saved audio to temporary file: {temp_audio_file}")
+            
+            # Initialize Sarvam batch client
+            client = SarvamAI(api_subscription_key=api_key)
+
+            # Create and configure batch STT job
+            job = client.speech_to_text_job.create_job(
+                language_code="en-IN",
+                model="saarika:v2.5",
+                with_diarization=False,
+                num_speakers=1
+            )
+            logger.info("Created batch transcription job")
+
+            # Upload the audio file
+            job.upload_files(file_paths=[temp_audio_file])
+            logger.info("Uploaded audio file for batch processing")
+            
+            # Start processing
+            job.start()
+            logger.info("Started batch processing job")
+
+            # Wait for completion
+            job.wait_until_complete()
+            logger.info("Batch processing complete")
+
+            # Check file-level results
+            file_results = job.get_file_results()
+
+            if len(file_results['successful']) == 0:
+                logger.error("Batch processing failed for all files")
+                if file_results['failed']:
+                    error_msg = file_results['failed'][0].get('error_message', 'Unknown error')
+                    logger.error(f"Batch error: {error_msg}")
+                return "Error: Batch transcription failed."
+
+            # Download outputs to temporary directory
+            temp_output_dir = tempfile.mkdtemp()
+            job.download_outputs(output_dir=temp_output_dir)
+            logger.info(f"Downloaded batch results to: {temp_output_dir}")
+
+            # Extract transcript from the downloaded results
+            # The output is typically a JSON file with the transcription
+            import glob
+            output_files = glob.glob(os.path.join(temp_output_dir, "*.json"))
+            
+            if not output_files:
+                logger.error("No output files found in batch results")
+                return "Error: Could not find transcription output."
+            
+            # Read the first output file (we only uploaded one audio file)
+            with open(output_files[0], 'r', encoding='utf-8') as f:
+                batch_result = json.load(f)
+            
+            # Extract transcript text from batch result
+            # The structure may vary, but typically it's in 'transcript' or similar field
+            transcript = batch_result.get("transcript", "")
+            if not transcript:
+                # Try alternative structures
+                transcript = batch_result.get("text", "")
+            
+            if not transcript:
+                logger.error(f"Could not extract transcript from batch result: {batch_result}")
+                return "Error: Could not extract transcript from batch processing."
+            
+            logger.info(f"Batch transcription successful: {transcript[:100]}...")
+            return transcript
+            
+        except Exception as batch_error:
+            logger.error(f"Batch processing failed: {batch_error}", exc_info=True)
+            return "Error: Batch transcription failed."
+        
+        finally:
+            # Clean up temporary files
+            if temp_audio_file and os.path.exists(temp_audio_file):
+                try:
+                    os.remove(temp_audio_file)
+                    logger.info(f"Cleaned up temp audio file: {temp_audio_file}")
+                except Exception as e:
+                    logger.warning(f"Could not delete temp file {temp_audio_file}: {e}")
+            
+            if temp_output_dir and os.path.exists(temp_output_dir):
+                try:
+                    import shutil
+                    shutil.rmtree(temp_output_dir)
+                    logger.info(f"Cleaned up temp output dir: {temp_output_dir}")
+                except Exception as e:
+                    logger.warning(f"Could not delete temp dir {temp_output_dir}: {e}")
+    
     except Exception as e:
-        logger.error(f"Transcription failed: {e}")
-        print("Transcription failed: ", e)
+        logger.error(f"Transcription failed: {e}", exc_info=True)
         return "Error: Could not transcribe audio."
 
 def transcribe_groq_audio(audio_binary: bytes) -> str:
@@ -271,7 +387,7 @@ def process_audio_async(
     try:
         # Transcribe audio using Groq
         logger.info("Starting audio transcription in background with Groq...")
-        text_body = transcribe_groq_audio(audio_binary)
+        text_body = transcribe_sarvam_audio(audio_binary)
         logger.info(f"Transcribed: {text_body}")
         
         if text_body.startswith("Error:"):
