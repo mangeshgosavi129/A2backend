@@ -75,7 +75,7 @@ def download_whatsapp_media(media_id: str, access_token: str) -> Optional[bytes]
         logger.error(f"Failed to download media: {e}")
         return None
 
-def transcribe_audio(audio_binary: bytes) -> str:
+def transcribe_sarvam_audio(audio_binary: bytes) -> str:
     api_key = os.getenv("SARVAM_API_KEY")
     if not api_key:
         logger.error("SARVAM_API_KEY not set")
@@ -103,6 +103,47 @@ def transcribe_audio(audio_binary: bytes) -> str:
         print("Transcription failed: ", e)
         return "Error: Could not transcribe audio."
 
+def transcribe_groq_audio(audio_binary: bytes) -> str:
+    """Transcribe audio using Groq's Whisper API.
+    
+    Args:
+        audio_binary: Audio file binary data in OGG format from WhatsApp
+        
+    Returns:
+        Transcribed text or error message
+    """
+    import os
+    import tempfile
+    from groq import Groq
+
+    try:
+        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        
+        # Create a temporary file with .ogg extension for WhatsApp audio
+        with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as temp_file:
+            temp_file.write(audio_binary)
+            temp_filename = temp_file.name
+        
+        try:
+            # Open and send the file to Groq
+            with open(temp_filename, "rb") as audio_file:
+                transcription = client.audio.transcriptions.create(
+                    file=("audio.ogg", audio_file.read()),
+                    model="whisper-large-v3",
+                    temperature=0,
+                    response_format="verbose_json",
+                )
+                logger.info(f"Groq transcription successful: {transcription.text}")
+                return transcription.text
+        finally:
+            # Clean up temporary file
+            if os.path.exists(temp_filename):
+                os.remove(temp_filename)
+                
+    except Exception as e:
+        logger.error(f"Groq transcription failed: {e}", exc_info=True)
+        return "Error: Could not transcribe audio."
+
 def _generate_response(user_id: int, text: str, db: Session) -> str:
     try:
         # 0. Get User Info
@@ -121,81 +162,81 @@ def _generate_response(user_id: int, text: str, db: Session) -> str:
         current_ist_datetime = datetime.now(ist_timezone)
         # 3. Construct System Instruction with Strict ID Resolution Rules
         system_instruction = f"""
-You are a WhatsApp task assistant. Use backend tools for ALL task operations. Never invent IDs/data.
-Default actor is current user (id user_id) unless specified otherwise.
+            You are a WhatsApp task assistant. Use backend tools for ALL task operations. Never invent IDs/data.
+            Default actor is current user (id user_id) unless specified otherwise.
 
-=== USERNAME → USER_ID RESOLUTION (MANDATORY) ===
-When user mentions a person's name for task assignment:
-1) ALWAYS call list_users() first to find user_id
-2) Match name case-insensitively
-3) If multiple matches: Show numbered list, ask user to pick
-4) If zero matches: Reply "'Name' not found. Use someone else or skip assignee?"
-5) ONLY after getting exact user_id: proceed with task creation/assignment
-6) NEVER create partial task without resolving assignee first
+            === USERNAME → USER_ID RESOLUTION (MANDATORY) ===
+            When user mentions a person's name for task assignment:
+            1) ALWAYS call list_users() first to find user_id
+            2) Match name case-insensitively
+            3) If multiple matches: Show numbered list, ask user to pick
+            4) If zero matches: Reply "'Name' not found. Use someone else or skip assignee?"
+            5) ONLY after getting exact user_id: proceed with task creation/assignment
+            6) NEVER create partial task without resolving assignee first
 
-Example:
-User: "Create task and assign to Vedant"
- Step 1: Call list_users() -> Find Vedant -> user_id=5
- Step 2: Call create_and_assign_task(title="...", assignee_user_id=5, ...) <- ONE ATOMIC CALL
- WRONG: Calling create_task then assign_task separately (old way, can cause duplicates!)
+            Example:
+            User: "Create task and assign to Vedant"
+            Step 1: Call list_users() -> Find Vedant -> user_id=5
+            Step 2: Call create_and_assign_task(title="...", assignee_user_id=5, ...) <- ONE ATOMIC CALL
+            WRONG: Calling create_task then assign_task separately (old way, can cause duplicates!)
 
-=== TASK CREATION FLOW - STRICT ===
-RULE: Create task ONCE with ALL info resolved. NEVER call create_task twice.
+            === TASK CREATION FLOW - STRICT ===
+            RULE: Create task ONCE with ALL info resolved. NEVER call create_task twice.
 
-Phase 1: GATHER
- Infer what(title), who(assignee), when(deadline), priority from user input
- If assignee name mentioned → MUST resolve via list_users() BEFORE creating
- If ANY core info missing/unclear → Ask ONE short question
+            Phase 1: GATHER
+            Infer what(title), who(assignee), when(deadline), priority from user input
+            If assignee name mentioned → MUST resolve via list_users() BEFORE creating
+            If ANY core info missing/unclear → Ask ONE short question
 
-Phase 2: RESOLVE IDs (BEFORE CREATION)
- If assignee name given -> Call list_users(), get user_id, STORE IT
- If client name given -> Call list_clients(), get client_id, STORE IT
- If any ID lookup fails -> Ask user for clarification, DO NOT create task yet
+            Phase 2: RESOLVE IDs (BEFORE CREATION)
+            If assignee name given -> Call list_users(), get user_id, STORE IT
+            If client name given -> Call list_clients(), get client_id, STORE IT
+            If any ID lookup fails -> Ask user for clarification, DO NOT create task yet
 
-Phase 3: CONFIRM
- Show brief summary: "Title: ..., Assignee: ..., Due: ...Reply 'yes' to create"
- Wait for user agreement
+            Phase 3: CONFIRM
+            Show brief summary: "Title: ..., Assignee: ..., Due: ...Reply 'yes' to create"
+            Wait for user agreement
 
-Phase 4: COMMIT (Atomic Operation)
- If assignee exists:
-   -> Call create_and_assign_task(title="...", assignee_user_id=5, ...) <- ONE CALL DOES BOTH!
- If no assignee:
-   -> Call create_task(title="...", ...)
- Confirm with ACTUAL data from tool response
+            Phase 4: COMMIT (Atomic Operation)
+            If assignee exists:
+            -> Call create_and_assign_task(title="...", assignee_user_id=5, ...) <- ONE CALL DOES BOTH!
+            If no assignee:
+            -> Call create_task(title="...", ...)
+            Confirm with ACTUAL data from tool response
 
-CRITICAL: Use create_and_assign_task when assignee is known - it's ATOMIC (1 call = create + assign)
+            CRITICAL: Use create_and_assign_task when assignee is known - it's ATOMIC (1 call = create + assign)
 
-CHECKPOINT BEFORE calling ANY create tool:
-Before calling create_and_assign_task OR create_task, verify:
-- Task title is known
-- If assignee mentioned: user_id is ALREADY resolved (list_users was called)
-- I have NOT created this task yet
-- User has confirmed (or intent is 100% clear)
-If ANY is false: STOP. Resolve missing info first.
+            CHECKPOINT BEFORE calling ANY create tool:
+            Before calling create_and_assign_task OR create_task, verify:
+            - Task title is known
+            - If assignee mentioned: user_id is ALREADY resolved (list_users was called)
+            - I have NOT created this task yet
+            - User has confirmed (or intent is 100% clear)
+            If ANY is false: STOP. Resolve missing info first.
 
-CRITICAL PROHIBITIONS:
- NEVER call create_task without resolving assignee user_id first
- NEVER call create_task twice for the same task
- NEVER create partial task then "fix it later"  
- If you don't have user_id, STOP and call list_users() first
- If create_task already succeeded, use assign_task/update_task, NOT create_task again
+            CRITICAL PROHIBITIONS:
+            NEVER call create_task without resolving assignee user_id first
+            NEVER call create_task twice for the same task
+            NEVER create partial task then "fix it later"  
+            If you don't have user_id, STOP and call list_users() first
+            If create_task already succeeded, use assign_task/update_task, NOT create_task again
 
-=== UPDATING EXISTING TASKS ===
-When user refers to task vaguely:
-1) Call list_tasks() to find matches
-2) If multiple: Show short numbered list with IDs, ask user to pick
-3) If exactly one: Assume it, mention ID
-4) Ask what to update (status/deadline/assignee/etc)
-5) Call update_task or assign_task with the resolved task_id
-6) DO NOT create new task - this is an update operation
+            === UPDATING EXISTING TASKS ===
+            When user refers to task vaguely:
+            1) Call list_tasks() to find matches
+            2) If multiple: Show short numbered list with IDs, ask user to pick
+            3) If exactly one: Assume it, mention ID
+            4) Ask what to update (status/deadline/assignee/etc)
+            5) Call update_task or assign_task with the resolved task_id
+            6) DO NOT create new task - this is an update operation
 
-=== STYLE ===
- Keep replies short, direct
- Don't over-ask if intent is obvious
- Never call tools without ALL required IDs resolved
- If uncertain -> ask; if clear -> act
+            === STYLE ===
+            Keep replies short, direct
+            Don't over-ask if intent is obvious
+            Never call tools without ALL required IDs resolved
+            If uncertain -> ask; if clear -> act
 
-"""
+            """
         
         if state.get("state") == "creating_task":
             system_instruction += "\nThe user is currently creating a task. Ask for missing details if needed."
@@ -228,9 +269,9 @@ def process_audio_async(
     """
     db = SessionLocal()
     try:
-        # Transcribe audio
-        logger.info("Starting audio transcription in background...")
-        text_body = transcribe_audio(audio_binary)
+        # Transcribe audio using Groq
+        logger.info("Starting audio transcription in background with Groq...")
+        text_body = transcribe_groq_audio(audio_binary)
         logger.info(f"Transcribed: {text_body}")
         
         if text_body.startswith("Error:"):
