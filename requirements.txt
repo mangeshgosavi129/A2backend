@@ -12,3 +12,4 @@ pytz
 openai
 groq
 sarvamai
+prometheus-client
