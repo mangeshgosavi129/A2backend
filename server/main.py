@@ -604,6 +604,23 @@ def create_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    # Deduplication check: Prevent duplicate tasks within 30 seconds
+    cutoff_time = datetime.utcnow() - timedelta(seconds=30)
+    existing_task = db.query(Task).filter(
+        Task.title == task_data.title,
+        Task.description == task_data.description,
+        Task.created_by == current_user.id,
+        Task.deadline == task_data.deadline,
+        # Note: assigned_to is NOT in Task model - assignments are in TaskAssignee table
+        Task.priority == task_data.priority,
+        Task.status == task_data.status,
+        Task.created_at >= cutoff_time
+    ).first()
+
+    if existing_task:
+        logging.info(f"Deduplicated task creation for user {current_user.id}: {task_data.title}")
+        return existing_task
+
     task = Task(**task_data.dict(), created_by=current_user.id)
     db.add(task)
     db.commit()
@@ -615,7 +632,8 @@ def get_tasks(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    tasks = db.query(Task).all()
+    # Exclude cancelled tasks (soft delete)
+    tasks = db.query(Task).filter(Task.status != TaskStatus.cancelled).all()
     return tasks
 
 @app.get("/tasks/{task_id}", response_model=TaskResponse)
@@ -626,6 +644,9 @@ def get_task(
 ):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    # Treat cancelled tasks as soft deleted
+    if task.status == TaskStatus.cancelled:
         raise HTTPException(status_code=404, detail="Task not found")
     return task
 
@@ -640,12 +661,62 @@ def update_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    for key, value in task_data.dict(exclude_unset=True).items():
+    # Prevent updates to cancelled tasks (soft delete)
+    if task.status == TaskStatus.cancelled:
+        raise HTTPException(status_code=403, detail="Cannot update cancelled task")
+    
+    # Deduplication check: If the update requests no changes to the current state, return early
+    # This prevents redundant notifications and DB writes
+    changes_detected = False
+    update_data = task_data.dict(exclude_unset=True)
+    
+    for key, value in update_data.items():
+        current_value = getattr(task, key)
+        # Handle enum comparisons and other types robustly
+        if current_value != value:
+            changes_detected = True
+            break
+    
+    if not changes_detected and update_data:
+        logging.info(f"Deduplicated task update for task {task_id}: No changes detected")
+        return task
+
+    for key, value in update_data.items():
         setattr(task, key, value)
     
     task.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(task)
+    
+    # Send WhatsApp notification to all assigned users
+    active_assignees = db.query(TaskAssignee).filter(
+        TaskAssignee.task_id == task_id,
+        TaskAssignee.unassigned_at.is_(None)
+    ).all()
+    
+    if active_assignees:
+        try:
+            from whatsapp.client import send_task_update_notification
+            task_dict = {
+                "id": task.id,
+                "title": task.title,
+                "description": task.description,
+                "status": task.status.value if task.status else "N/A",
+                "priority": task.priority.value if task.priority else "medium",
+                "deadline": task.deadline.strftime("%Y-%m-%d %H:%M") if task.deadline else None
+            }
+            
+            for assignee in active_assignees:
+                user = assignee.user
+                if user and user.phone:
+                    result, status_code = send_task_update_notification(user.phone, task_dict)
+                    if status_code == 200:
+                        logging.info(f"✅ WhatsApp update notification sent to {user.name} ({user.phone}) for task {task.id}")
+                    else:
+                        logging.error(f"❌ WhatsApp update notification failed for {user.name}: {result}")
+        except Exception as e:
+            logging.error(f"Failed to send task update notification: {e}")
+    
     return task
 
 @app.post("/tasks/{task_id}/cancel", response_model=TaskResponse)
@@ -659,11 +730,44 @@ def cancel_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
+    # Deduplication check: If already cancelled, return success immediately
+    if task.status == TaskStatus.cancelled:
+        logging.info(f"Deduplicated task cancellation for task {task_id}: Already cancelled")
+        return task
+    
+    # Get active assignees before cancelling
+    active_assignees = db.query(TaskAssignee).filter(
+        TaskAssignee.task_id == task_id,
+        TaskAssignee.unassigned_at.is_(None)
+    ).all()
+    
     task.status = TaskStatus.cancelled
     task.cancellation_reason = cancel_data.cancellation_reason
     task.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(task)
+    
+    # Send WhatsApp notification to all assigned users
+    if active_assignees:
+        try:
+            from whatsapp.client import send_task_cancellation_notification
+            task_dict = {
+                "id": task.id,
+                "title": task.title,
+                "cancellation_reason": task.cancellation_reason
+            }
+            
+            for assignee in active_assignees:
+                user = assignee.user
+                if user and user.phone:
+                    result, status_code = send_task_cancellation_notification(user.phone, task_dict)
+                    if status_code == 200:
+                        logging.info(f"✅ WhatsApp cancellation notification sent to {user.name} ({user.phone}) for task {task.id}")
+                    else:
+                        logging.error(f"❌ WhatsApp cancellation notification failed for {user.name}: {result}")
+        except Exception as e:
+            logging.error(f"Failed to send task cancellation notification: {e}")
+    
     return task
 
 # =========================================================
@@ -679,6 +783,10 @@ def assign_task(
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Prevent operations on cancelled tasks
+    if task.status == TaskStatus.cancelled:
+        raise HTTPException(status_code=403, detail="Cannot modify cancelled task")
     
     user = db.query(User).filter(User.id == assign_data.user_id).first()
     if not user:
@@ -731,6 +839,10 @@ def assign_task_multiple(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
+    # Prevent operations on cancelled tasks
+    if task.status == TaskStatus.cancelled:
+        raise HTTPException(status_code=403, detail="Cannot modify cancelled task")
+    
     for user_id in assign_data.user_ids:
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
@@ -771,6 +883,13 @@ def unassign_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    # Check if task exists and is not cancelled
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.status == TaskStatus.cancelled:
+        raise HTTPException(status_code=403, detail="Cannot modify cancelled task")
+    
     assignment = db.query(TaskAssignee).filter(
         TaskAssignee.task_id == task_id,
         TaskAssignee.user_id == unassign_data.user_id,
@@ -794,6 +913,10 @@ def get_task_assignments(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
+    # Prevent operations on cancelled tasks
+    if task.status == TaskStatus.cancelled:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
     # Filter for active assignments (where unassigned_at is None)
     active_assignees = [a for a in task.assignees if a.unassigned_at is None]
     return active_assignees
@@ -811,6 +934,10 @@ def add_checklist_item(
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Prevent operations on cancelled tasks
+    if task.status == TaskStatus.cancelled:
+        raise HTTPException(status_code=403, detail="Cannot modify cancelled task")
     
     checklist = task.checklist or []
     checklist.append(item.dict())
@@ -831,6 +958,10 @@ def update_checklist_item(
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Prevent operations on cancelled tasks
+    if task.status == TaskStatus.cancelled:
+        raise HTTPException(status_code=403, detail="Cannot modify cancelled task")
     
     checklist = task.checklist or []
     if update_data.index >= len(checklist):
@@ -858,6 +989,10 @@ def remove_checklist_item(
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Prevent operations on cancelled tasks
+    if task.status == TaskStatus.cancelled:
+        raise HTTPException(status_code=403, detail="Cannot modify cancelled task")
     
     checklist = task.checklist or []
     if remove_data.index >= len(checklist):

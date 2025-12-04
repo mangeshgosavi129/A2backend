@@ -105,3 +105,51 @@ def send_task_notification(phone: str, task_dict: dict, config: Optional[WhatsAp
     
     # Send the notification
     return send_whatsapp_text(phone, message, config)
+
+def send_task_update_notification(phone: str, task_dict: dict, config: Optional[WhatsAppConfig] = None) -> Tuple[Mapping, int]:
+    """
+    Sends a WhatsApp notification when a task is updated.
+    
+    Arguments:
+        phone (str): The recipient's phone number.
+        task_dict (dict): Task details including title, status, priority, deadline.
+        config (WhatsAppConfig, optional): WhatsApp configuration.
+    """
+    # Format the notification message
+    message = f"📝 *Task Updated*\n\n"
+    message += f"*Title:* {task_dict.get('title', 'N/A')}\n"
+    
+    if task_dict.get('description'):
+        message += f"*Description:* {task_dict['description']}\n"
+    
+    message += f"*Status:* {task_dict.get('status', 'N/A').upper()}\n"
+    message += f"*Priority:* {task_dict.get('priority', 'medium').upper()}\n"
+    
+    if task_dict.get('deadline'):
+        message += f"*Deadline:* {task_dict['deadline']}\n"
+    
+    message += f"\nTask ID: #{task_dict.get('id', 'N/A')}"
+    
+    # Send the notification
+    return send_whatsapp_text(phone, message, config)
+
+def send_task_cancellation_notification(phone: str, task_dict: dict, config: Optional[WhatsAppConfig] = None) -> Tuple[Mapping, int]:
+    """
+    Sends a WhatsApp notification when a task is cancelled.
+    
+    Arguments:
+        phone (str): The recipient's phone number.
+        task_dict (dict): Task details including title and cancellation_reason.
+        config (WhatsAppConfig, optional): WhatsApp configuration.
+    """
+    # Format the notification message
+    message = f"❌ *Task Cancelled*\n\n"
+    message += f"*Title:* {task_dict.get('title', 'N/A')}\n"
+    
+    if task_dict.get('cancellation_reason'):
+        message += f"*Reason:* {task_dict['cancellation_reason']}\n"
+    
+    message += f"\nTask ID: #{task_dict.get('id', 'N/A')}"
+    
+    # Send the notification
+    return send_whatsapp_text(phone, message, config)
