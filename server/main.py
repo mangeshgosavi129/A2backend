@@ -52,22 +52,55 @@ class MessageChannel(str, enum.Enum):
     web = "web"
     system = "system"
 
+class Role(str, enum.Enum):
+    owner = "owner"
+    manager = "manager"
+    employee = "employee"
+    intern = "intern"
+
 # =========================================================
 # DATABASE MODELS
 # =========================================================
+class Organisation(Base):
+    __tablename__ = "organisations"
+    id = Column(Integer, primary_key=True)
+    name = Column(String(150), unique=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    users = relationship("User", back_populates="organisation")
+    clients = relationship("Client", back_populates="organisation")
+    tasks = relationship("Task", back_populates="organisation")
+    messages = relationship("Message", back_populates="organisation")
+    user_roles = relationship("UserRole", back_populates="organisation")
+
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organisations.id"), nullable=False)
     name = Column(String(100), nullable=False)
     phone = Column(String(20), unique=True, nullable=False)
     department = Column(String(100))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
+    organisation = relationship("Organisation", back_populates="users")
     auth_credential = relationship("AuthCredential", back_populates="user", uselist=False)
     tasks_created = relationship("Task", back_populates="creator")
     task_assignments = relationship("TaskAssignee", back_populates="user")
     messages = relationship("Message", back_populates="user")
+    roles = relationship("UserRole", back_populates="user")
+
+class UserRole(Base):
+    __tablename__ = "user_roles"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    org_id = Column(Integer, ForeignKey("organisations.id"), nullable=False)
+    role = Column(SQLEnum(Role), nullable=False, default=Role.intern)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    user = relationship("User", back_populates="roles")
+    organisation = relationship("Organisation", back_populates="user_roles")
 
 class AuthCredential(Base):
     __tablename__ = "auth_credentials"
@@ -81,17 +114,20 @@ class AuthCredential(Base):
 class Client(Base):
     __tablename__ = "clients"
     id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organisations.id"), nullable=False)
     name = Column(String(150), nullable=False)
     phone = Column(String(20))
     project_name = Column(String(150))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
+    organisation = relationship("Organisation", back_populates="clients")
     tasks = relationship("Task", back_populates="client")
 
 class Task(Base):
     __tablename__ = "tasks"
     id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organisations.id"), nullable=False)
     client_id = Column(Integer, ForeignKey("clients.id"))
     title = Column(String(200), nullable=False)
     description = Column(Text)
@@ -107,6 +143,7 @@ class Task(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
+    organisation = relationship("Organisation", back_populates="tasks")
     client = relationship("Client", back_populates="tasks")
     creator = relationship("User", back_populates="tasks_created")
     assignees = relationship("TaskAssignee", back_populates="task")
@@ -130,6 +167,7 @@ class TaskAssignee(Base):
 class Message(Base):
     __tablename__ = "messages"
     id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organisations.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"))
     task_id = Column(Integer, ForeignKey("tasks.id"))
     direction = Column(SQLEnum(MessageDirection), nullable=False)
@@ -140,17 +178,34 @@ class Message(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     user_state = Column(JSONB, default={})
     
+    organisation = relationship("Organisation", back_populates="messages")
     user = relationship("User", back_populates="messages")
     task = relationship("Task", back_populates="messages")
 
 # =========================================================
 # PYDANTIC SCHEMAS
 # =========================================================
+
+# Organisation Schemas
+class OrganisationCreate(BaseModel):
+    name: str
+
+class OrganisationResponse(BaseModel):
+    id: int
+    name: str
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+# User Schemas
 class UserCreate(BaseModel):
     name: str
     phone: str
     password: str
     department: Optional[str] = None
+    org_name: Optional[str] = None  # For creating new org
+    org_id: Optional[int] = None    # For joining existing org
 
 class UserLogin(BaseModel):
     phone: str
@@ -160,8 +215,16 @@ class UserUpdate(BaseModel):
     name: Optional[str] = None
     department: Optional[str] = None
 
+class RoleResponse(BaseModel):
+    role: Role
+    org_id: int
+    
+    class Config:
+        from_attributes = True
+
 class UserResponse(BaseModel):
     id: int
+    org_id: int
     name: str
     phone: str
     department: Optional[str]
@@ -169,6 +232,10 @@ class UserResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+class RoleAssignment(BaseModel):
+    user_id: int
+    role: Role
 
 class ClientCreate(BaseModel):
     name: str
@@ -318,6 +385,9 @@ def create_access_token(data: dict):
     expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     to_encode["sub"] = str(to_encode["sub"])
+    # Ensure org_id is included in token
+    if "org_id" in data:
+        to_encode["org_id"] = data["org_id"]
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 def get_db():
@@ -381,7 +451,25 @@ async def get_current_user(
     if user is None:
         print(f"DEBUG: no user found with id={user_id}")
         raise HTTPException(status_code=401, detail="User not found")
+    
+    # Validate org_id from token matches user's org
+    token_org_id = payload.get("org_id")
+    if token_org_id and user.org_id != token_org_id:
+        print(f"DEBUG: org_id mismatch - token: {token_org_id}, user: {user.org_id}")
+        raise HTTPException(status_code=401, detail="Invalid token: organisation mismatch")
+    
     return user
+
+# Helper to get user with their role
+async def get_current_user_with_role(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get current user along with their role in the organisation"""
+    from server.permissions import get_user_role_in_org
+    
+    role = get_user_role_in_org(db, current_user.id, current_user.org_id)
+    return {"user": current_user, "role": role, "org_id": current_user.org_id}
 
 
 
@@ -420,7 +508,7 @@ origins = [
     "https://gsstask.vercel.app",  # <--- This is the crucial line
     "http://localhost:8001",
     "http://localhost:5050",
-    "http://localhost",
+    "http://localhost:3000",
 ]
 app.add_middleware(
     CORSMiddleware,
@@ -484,8 +572,35 @@ def signup(user_data: UserCreate, db: Session = Depends(get_db)):
     if existing:
         raise HTTPException(status_code=400, detail="Phone already registered")
     
+    # Determine organisation
+    org = None
+    is_org_creator = False
+    
+    if user_data.org_name:
+        # First user creating a new organisation
+        existing_org = db.query(Organisation).filter(Organisation.name == user_data.org_name).first()
+        if existing_org:
+            raise HTTPException(status_code=400, detail="Organisation name already exists")
+        
+        org = Organisation(name=user_data.org_name)
+        db.add(org)
+        db.flush()
+        is_org_creator = True
+        
+    elif user_data.org_id:
+        # Joining existing organisation
+        org = db.query(Organisation).filter(Organisation.id == user_data.org_id).first()
+        if not org:
+            raise HTTPException(status_code=404, detail="Organisation not found")
+    else:
+        raise HTTPException(
+            status_code=400, 
+            detail="Must provide either org_name (to create) or org_id (to join)"
+        )
+    
     # Create user
     user = User(
+        org_id=org.id,
         name=user_data.name,
         phone=user_data.phone,
         department=user_data.department
@@ -499,10 +614,19 @@ def signup(user_data: UserCreate, db: Session = Depends(get_db)):
         password_hash=hash_password(user_data.password)
     )
     db.add(auth)
+    
+    # Assign role - Owner for org creator, Intern for others
+    role = Role.owner if is_org_creator else Role.intern
+    user_role = UserRole(
+        user_id=user.id,
+        org_id=org.id,
+        role=role
+    )
+    db.add(user_role)
     db.commit()
     
-    # Generate token
-    token = create_access_token({"sub": user.id})
+    # Generate token with org_id
+    token = create_access_token({"sub": user.id, "org_id": org.id})
     return {"access_token": token, "token_type": "bearer"}
 
 @app.post("/auth/login", response_model=Token)
@@ -514,7 +638,8 @@ def login(credentials: UserLogin, db: Session = Depends(get_db)):
     if not verify_password(credentials.password, user.auth_credential.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     
-    token = create_access_token({"sub": user.id})
+    # Include org_id in token
+    token = create_access_token({"sub": user.id, "org_id": user.org_id})
     return {"access_token": token, "token_type": "bearer"}
 
 @app.post("/auth/logout")
@@ -532,7 +657,8 @@ def get_users(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    query = db.query(User)
+    # Filter by org_id for tenant isolation
+    query = db.query(User).filter(User.org_id == current_user.org_id)
     if name:
         query = query.filter(User.name.ilike(f"%{name}%"))
     if department:
@@ -586,15 +712,133 @@ def delete_user(
     return None
 
 # =========================================================
+# ORGANISATION ENDPOINTS
+# =========================================================
+@app.get("/organisations/{org_id}", response_model=OrganisationResponse)
+def get_organisation(
+    org_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Verify user belongs to this org
+    if current_user.org_id != org_id:
+        raise HTTPException(status_code=403, detail="Access denied: not a member of this organisation")
+    
+    org = db.query(Organisation).filter(Organisation.id == org_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organisation not found")
+    
+    return org
+
+@app.get("/organisations", response_model=List[OrganisationResponse])
+def list_organisations(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # For now, users can only see their own organisation
+    org = db.query(Organisation).filter(Organisation.id == current_user.org_id).all()
+    return org
+
+# =========================================================
+# ROLE MANAGEMENT ENDPOINTS
+# =========================================================
+@app.post("/organisations/{org_id}/roles", status_code=status.HTTP_200_OK)
+def assign_role(
+    org_id: int,
+    role_assignment: RoleAssignment,
+    context = Depends(get_current_user_with_role),
+    db: Session = Depends(get_db)
+):
+    from server.permissions import can_assign_roles, check_org_access
+    
+    current_user = context["user"]
+    current_role = context["role"]
+    
+    # Verify user is in this org
+    if not check_org_access(current_user.org_id, org_id):
+        raise HTTPException(status_code=403, detail="Access denied: not a member of this organisation")
+    
+    # Check permission
+    if not can_assign_roles(current_role):
+        raise HTTPException(status_code=403, detail="Permission denied: only Owners can assign roles")
+    
+    # Verify target user exists and is in the org
+    target_user = db.query(User).filter(User.id == role_assignment.user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if target_user.org_id != org_id:
+        raise HTTPException(status_code=400, detail="User is not a member of this organisation")
+    
+    # Update or create role assignment
+    existing_role = db.query(UserRole).filter(
+        UserRole.user_id == role_assignment.user_id,
+        UserRole.org_id == org_id
+    ).first()
+    
+    if existing_role:
+        existing_role.role = role_assignment.role
+    else:
+        new_role = UserRole(
+            user_id=role_assignment.user_id,
+            org_id=org_id,
+            role=role_assignment.role
+        )
+        db.add(new_role)
+    
+    db.commit()
+    return {"message": f"Role updated to {role_assignment.role.value} for user {role_assignment.user_id}"}
+
+@app.get("/organisations/{org_id}/roles")
+def list_org_roles(
+    org_id: int,
+    context = Depends(get_current_user_with_role),
+    db: Session = Depends(get_db)
+):
+    from server.permissions import check_org_access
+    
+    current_user = context["user"]
+    
+    # Verify user is in this org
+    if not check_org_access(current_user.org_id, org_id):
+        raise HTTPException(status_code=403, detail="Access denied: not a member of this organisation")
+    
+    # Get all user roles in this org
+    user_roles = db.query(UserRole, User).join(User, UserRole.user_id == User.id).filter(
+        UserRole.org_id == org_id
+    ).all()
+    
+    result = []
+    for user_role, user in user_roles:
+        result.append({
+            "user_id": user.id,
+            "user_name": user.name,
+            "role": user_role.role.value,
+            "assigned_at": user_role.created_at
+        })
+    
+    return result
+
+# =========================================================
 # CLIENT ENDPOINTS
 # =========================================================
 @app.post("/clients", response_model=ClientResponse, status_code=status.HTTP_201_CREATED)
 def create_client(
     client_data: ClientCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    context = Depends(get_current_user_with_role),
+    db: Session = Depends(get_db)
 ):
-    client = Client(**client_data.dict())
+    from server.permissions import can_manage_clients
+    
+    current_user = context["user"]
+    current_role = context["role"]
+    
+    # Check permission
+    if not can_manage_clients(current_role):
+        raise HTTPException(status_code=403, detail="Permission denied: Manager+ role required")
+    
+    # Auto-set org_id from current user
+    client = Client(**client_data.dict(), org_id=current_user.org_id)
     db.add(client)
     db.commit()
     db.refresh(client)
@@ -605,7 +849,8 @@ def get_clients(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    clients = db.query(Client).all()
+    # Filter by org_id for tenant isolation
+    clients = db.query(Client).filter(Client.org_id == current_user.org_id).all()
     return clients
 
 @app.get("/clients/{client_id}", response_model=ClientResponse)
@@ -614,7 +859,7 @@ def get_client(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    client = db.query(Client).filter(Client.id == client_id).first()
+    client = db.query(Client).filter(Client.id == client_id, Client.org_id == current_user.org_id).first()
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     return client
@@ -623,10 +868,19 @@ def get_client(
 def update_client(
     client_id: int,
     client_data: ClientUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    context = Depends(get_current_user_with_role),
+    db: Session = Depends(get_db)
 ):
-    client = db.query(Client).filter(Client.id == client_id).first()
+    from server.permissions import can_manage_clients
+    
+    current_user = context["user"]
+    current_role = context["role"]
+    
+    # Check permission
+    if not can_manage_clients(current_role):
+        raise HTTPException(status_code=403, detail="Permission denied: Manager+ role required")
+    
+    client = db.query(Client).filter(Client.id == client_id, Client.org_id == current_user.org_id).first()
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     
@@ -641,10 +895,19 @@ def update_client(
 @app.delete("/clients/{client_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_client(
     client_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    context = Depends(get_current_user_with_role),
+    db: Session = Depends(get_db)
 ):
-    client = db.query(Client).filter(Client.id == client_id).first()
+    from server.permissions import can_manage_clients
+    
+    current_user = context["user"]
+    current_role = context["role"]
+    
+    # Check permission
+    if not can_manage_clients(current_role):
+        raise HTTPException(status_code=403, detail="Permission denied: Manager+ role required")
+    
+    client = db.query(Client).filter(Client.id == client_id, Client.org_id == current_user.org_id).first()
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     
@@ -658,17 +921,26 @@ def delete_client(
 @app.post("/tasks", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
 def create_task(
     task_data: TaskCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    context = Depends(get_current_user_with_role),
+    db: Session = Depends(get_db)
 ):
+    from server.permissions import can_create_task
+    
+    current_user = context["user"]
+    current_role = context["role"]
+    
+    # Check permission
+    if not can_create_task(current_role):
+        raise HTTPException(status_code=403, detail="Permission denied: Employee+ role required")
+    
     # Deduplication check: Prevent duplicate tasks within 30 seconds
     cutoff_time = datetime.utcnow() - timedelta(seconds=30)
     existing_task = db.query(Task).filter(
+        Task.org_id == current_user.org_id,
         Task.title == task_data.title,
         Task.description == task_data.description,
         Task.created_by == current_user.id,
         Task.deadline == task_data.deadline,
-        # Note: assigned_to is NOT in Task model - assignments are in TaskAssignee table
         Task.priority == task_data.priority,
         Task.status == task_data.status,
         Task.created_at >= cutoff_time
@@ -678,7 +950,8 @@ def create_task(
         logging.info(f"Deduplicated task creation for user {current_user.id}: {task_data.title}")
         return existing_task
 
-    task = Task(**task_data.dict(), created_by=current_user.id)
+    # Auto-set org_id from current user
+    task = Task(**task_data.dict(), org_id=current_user.org_id, created_by=current_user.id)
     db.add(task)
     db.commit()
     db.refresh(task)
@@ -686,11 +959,29 @@ def create_task(
 
 @app.get("/tasks", response_model=List[TaskResponse])
 def get_tasks(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    context = Depends(get_current_user_with_role),
+    db: Session = Depends(get_db)
 ):
-    # Exclude cancelled tasks (soft delete)
-    tasks = db.query(Task).filter(Task.status != TaskStatus.cancelled).all()
+    from server.permissions import can_view_all_org_tasks
+    
+    current_user = context["user"]
+    current_role = context["role"]
+    
+    # Base filter: org_id and exclude cancelled
+    query = db.query(Task).filter(
+        Task.org_id == current_user.org_id,
+        Task.status != TaskStatus.cancelled
+    )
+    
+    # Role-based filtering: Employee/Intern see only assigned tasks
+    if not can_view_all_org_tasks(current_role):
+        # Filter to only tasks assigned to current user
+        query = query.join(TaskAssignee).filter(
+            TaskAssignee.user_id == current_user.id,
+            TaskAssignee.unassigned_at == None
+        )
+    
+    tasks = query.all()
     return tasks
 
 @app.get("/tasks/{task_id}", response_model=TaskResponse)
@@ -699,7 +990,10 @@ def get_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    task = db.query(Task).filter(Task.id == task_id).first()
+    task = db.query(Task).filter(
+        Task.id == task_id,
+        Task.org_id == current_user.org_id  # Tenant isolation
+    ).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     # Treat cancelled tasks as soft deleted
@@ -711,16 +1005,28 @@ def get_task(
 def update_task(
     task_id: int,
     task_data: TaskUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    context = Depends(get_current_user_with_role),
+    db: Session = Depends(get_db)
 ):
-    task = db.query(Task).filter(Task.id == task_id).first()
+    from server.permissions import can_update_assigned_task
+    
+    current_user = context["user"]
+    current_role = context["role"]
+    
+    task = db.query(Task).filter(
+        Task.id == task_id,
+        Task.org_id == current_user.org_id  # Tenant isolation
+    ).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
     # Prevent updates to cancelled tasks (soft delete)
     if task.status == TaskStatus.cancelled:
         raise HTTPException(status_code=403, detail="Cannot update cancelled task")
+    
+    # Check permission: Manager+ OR assigned user
+    if not can_update_assigned_task(current_user.id, task, current_role):
+        raise HTTPException(status_code=403, detail="Permission denied: not authorized to update this task")
     
     # Deduplication check: If the update requests no changes to the current state, return early
     # This prevents redundant notifications and DB writes
@@ -780,10 +1086,22 @@ def update_task(
 def cancel_task(
     task_id: int,
     cancel_data: TaskCancel,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    context = Depends(get_current_user_with_role),
+    db: Session = Depends(get_db)
 ):
-    task = db.query(Task).filter(Task.id == task_id).first()
+    from server.permissions import can_delete_task
+    
+    current_user = context["user"]
+    current_role = context["role"]
+    
+    # Check permission
+    if not can_delete_task(current_role):
+        raise HTTPException(status_code=403, detail="Permission denied: Manager+ role required")
+    
+    task = db.query(Task).filter(
+        Task.id == task_id,
+        Task.org_id == current_user.org_id  # Tenant isolation
+    ).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     

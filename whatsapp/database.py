@@ -43,22 +43,55 @@ class MessageChannel(str, enum.Enum):
     web = "web"
     system = "system"
 
+class Role(str, enum.Enum):
+    owner = "owner"
+    manager = "manager"
+    employee = "employee"
+    intern = "intern"
+
 # =========================================================
 # DATABASE MODELS
 # =========================================================
+class Organisation(Base):
+    __tablename__ = "organisations"
+    id = Column(Integer, primary_key=True)
+    name = Column(String(150), unique=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    users = relationship("User", back_populates="organisation")
+    clients = relationship("Client", back_populates="organisation")
+    tasks = relationship("Task", back_populates="organisation")
+    messages = relationship("Message", back_populates="organisation")
+    user_roles = relationship("UserRole", back_populates="organisation")
+
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organisations.id"), nullable=False)
     name = Column(String(100), nullable=False)
     phone = Column(String(20), unique=True, nullable=False)
     department = Column(String(100))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
+    organisation = relationship("Organisation", back_populates="users")
     auth_credential = relationship("AuthCredential", back_populates="user", uselist=False)
     tasks_created = relationship("Task", back_populates="creator")
     task_assignments = relationship("TaskAssignee", back_populates="user")
     messages = relationship("Message", back_populates="user")
+    roles = relationship("UserRole", back_populates="user")
+
+class UserRole(Base):
+    __tablename__ = "user_roles"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    org_id = Column(Integer, ForeignKey("organisations.id"), nullable=False)
+    role = Column(SQLEnum(Role), nullable=False, default=Role.intern)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    user = relationship("User", back_populates="roles")
+    organisation = relationship("Organisation", back_populates="user_roles")
 
 class AuthCredential(Base):
     __tablename__ = "auth_credentials"
@@ -72,17 +105,20 @@ class AuthCredential(Base):
 class Client(Base):
     __tablename__ = "clients"
     id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organisations.id"), nullable=False)
     name = Column(String(150), nullable=False)
     phone = Column(String(20))
     project_name = Column(String(150))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
+    organisation = relationship("Organisation", back_populates="clients")
     tasks = relationship("Task", back_populates="client")
 
 class Task(Base):
     __tablename__ = "tasks"
     id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organisations.id"), nullable=False)
     client_id = Column(Integer, ForeignKey("clients.id"))
     title = Column(String(200), nullable=False)
     description = Column(Text)
@@ -98,6 +134,7 @@ class Task(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
+    organisation = relationship("Organisation", back_populates="tasks")
     client = relationship("Client", back_populates="tasks")
     creator = relationship("User", back_populates="tasks_created")
     assignees = relationship("TaskAssignee", back_populates="task")
@@ -121,6 +158,7 @@ class TaskAssignee(Base):
 class Message(Base):
     __tablename__ = "messages"
     id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organisations.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"))
     task_id = Column(Integer, ForeignKey("tasks.id"))
     direction = Column(SQLEnum(MessageDirection), nullable=False)
@@ -131,5 +169,6 @@ class Message(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     user_state = Column(JSONB, default={})
     
+    organisation = relationship("Organisation", back_populates="messages")
     user = relationship("User", back_populates="messages")
     task = relationship("Task", back_populates="messages")

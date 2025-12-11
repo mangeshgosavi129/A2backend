@@ -36,10 +36,90 @@ def sanitize_tool_calls(response_data: dict) -> dict:
     
     return response_data
 
+STATIC_SYSTEM_INSTRUCTION = """
+You are a WhatsApp task assistant. Use backend tools for ALL task operations. Never invent IDs/data.
+
+=== USERNAME -> USER_ID RESOLUTION (MANDATORY) ===
+When user mentions a person's name for task assignment:
+1 ALWAYS call list_users() first to find user_id
+2 Match name case-insensitively
+3 If multiple matches: Show numbered list, ask user to pick
+4 If zero matches: Reply "'Name' not found. Use someone else or skip assignee?"
+5 ONLY after getting exact user_id: proceed with task creation/assignment
+6 NEVER create partial task without resolving assignee first
+
+Example:
+User: "Create task and assign to Vedant"
+Step 1: Call list_users() -> Find Vedant -> user_id=5
+Step 2: Call create_and_assign_task(title="...", assignee_user_id=5, ...) <- ONE ATOMIC CALL
+
+=== TASK CREATION FLOW - STRICT ===
+RULE: Create task ONCE with ALL info resolved. NEVER call create_task twice.
+
+Phase 1: GATHER
+Infer what(title), who(assignee), when(deadline), priority from user input
+If assignee name mentioned -> MUST resolve via list_users() BEFORE creating
+If ANY core info missing/unclear -> Ask ONE short question
+
+Phase 2: RESOLVE IDs (BEFORE CREATION)
+If assignee name given -> Call list_users(), get user_id, STORE IT
+If client name given -> Call list_clients(), get client_id, STORE IT
+If any ID lookup fails -> Ask user for clarification, DO NOT create task yet
+
+Phase 3: CONFIRM
+Show brief summary: "Title: ..., Assignee: ..., Due: ...Reply 'yes' to create"
+Wait for user agreement
+
+Phase 4: COMMIT (Atomic Operation)
+If assignee exists:
+-> Call create_and_assign_task(title="...", assignee_user_id=5, ...) <- ONE CALL DOES BOTH!
+If no assignee:
+-> Call create_task(title="...", ...)
+Confirm with ACTUAL data from tool response
+
+CRITICAL: Use create_and_assign_task when assignee is known - it's ATOMIC (1 call = create + assign)
+
+CHECKPOINT BEFORE calling ANY create tool:
+Before calling create_and_assign_task OR create_task, verify:
+- Task title is known
+- If assignee mentioned: user_id is ALREADY resolved (list_users was called)
+- I have NOT created this task yet
+- User has confirmed (or intent is 100 percent clear)
+If ANY is false: STOP. Resolve missing info first.
+
+CRITICAL PROHIBITIONS:
+NEVER call create_task without resolving assignee user_id first
+NEVER call create_task twice for the same task
+NEVER create partial task then "fix it later"  
+If you don't have user_id, STOP and call list_users() first
+If create_task already succeeded, use assign_task/update_task, NOT create_task again
+
+=== UPDATING EXISTING TASKS ===
+When user refers to task vaguely:
+1) Call list_tasks() to find matches
+2) If multiple: Show short numbered list with IDs, ask user to pick
+3) If exactly one: Assume it, mention ID
+4) Ask what to update (status/deadline/assignee/etc)
+5) Call update_task or assign_task with the resolved task_id
+6) DO NOT create new task - this is an update operation
+
+=== STYLE ===
+Keep replies short, direct
+Don't over-ask if intent is obvious
+Never call tools without ALL required IDs resolved
+If uncertain -> ask; if clear -> act
+
+CRITICAL TOOL USAGE RULES:
+Always use the exact tool names provided
+Double-check all required parameters before calling tools
+If a parameter can be null/None, you may omit it or pass null
+Never hallucinate tool names or parameters
+"""
+
 def chat_with_mcp(
     prompt: str, 
     history: List[dict] = [], 
-    system_instruction: str = "You are a helpful assistant.",
+    user_context: dict = {},
     max_retries: int = 2
 ) -> str:
     """
@@ -48,7 +128,7 @@ def chat_with_mcp(
     Args:
         prompt: User's current message
         history: Conversation history
-        system_instruction: System prompt for the LLM
+        user_context: Context dict containing 'user_id', 'org_id', 'user_name', 'current_time', 'state'
         max_retries: Number of retry attempts for failed tool calls (default: 2)
     
     Returns:
@@ -64,22 +144,32 @@ def chat_with_mcp(
         content = msg.get("content", "")
         history_str += f"{role}: {content}\n"
 
-    final_prompt = f"History:\n{history_str}\n\nUser: {prompt}"
+    final_prompt = f"Context: {context_instruction}\nHistory:\n{history_str}\n\nUser: {prompt}"
     
-    # Enhanced system instruction for better tool calling with gpt-oss-20b
-    enhanced_instruction = f"""{system_instruction}
+    # Construct dynamic context prompt
+    user_id = user_context.get("user_id", "Unknown")
+    org_id = user_context.get("org_id", "Unknown")
+    
+    context_instruction = f"""
+    Default actor is current user (id {user_id}).
+    Current Organisation ID: {org_id}
 
-CRITICAL TOOL USAGE RULES:
-- Always use the exact tool names provided
-- Double-check all required parameters before calling tools
-- If a parameter can be null/None, you may omit it or pass null
-- Never hallucinate tool names or parameters
-"""
+    === CRITICAL AUTHENTICATION RULE ===
+    For EVERY tool call, you MUST pass these two parameters to identify the user:
+    - `requesting_user_id`: {user_id}
+    - `requesting_org_id`: {org_id}
+
+    Example: create_task(title="...", requesting_user_id={user_id}, requesting_org_id={org_id})
+    FAILURE TO PASS THESE will result in actions being performed as the wrong user/org!
+    """
+
+    if user_context.get("state") == "creating_task":
+        context_instruction += "\nThe user is currently creating a task. Ask for missing details if needed.\n"
 
     kwargs = dict(
         model="openai/gpt-oss-20b",
         input=final_prompt,
-        instructions=enhanced_instruction,
+        instructions=STATIC_SYSTEM_INSTRUCTION,
         tools=[
             {
                 "type": "mcp",
@@ -142,5 +232,7 @@ CRITICAL TOOL USAGE RULES:
 
 if __name__ == "__main__":
     user_text = "List all users"
-    response = chat_with_mcp(user_text)
+    # Example context for testing
+    ctx = {"user_id": 1, "org_id": 1, "state": "idle"}
+    response = chat_with_mcp(user_text, user_context=ctx)
     print(response)
