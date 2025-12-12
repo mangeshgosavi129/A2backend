@@ -49,6 +49,10 @@ def can_manage_clients(role: Role) -> bool:
     """Check if role can create/update/delete clients"""
     return role in [Role.owner, Role.manager]
 
+def can_manage_users(role: Role) -> bool:
+    """Check if role can create/update/delete users"""
+    return role in [Role.owner, Role.manager]
+
 def can_assign_roles(role: Role) -> bool:
     """Check if role can assign roles to users"""
     return role == Role.owner

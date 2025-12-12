@@ -229,6 +229,7 @@ class UserResponse(BaseModel):
     phone: str
     department: Optional[str]
     created_at: datetime
+    role: Optional[Role] = None
     
     class Config:
         from_attributes = True
@@ -663,7 +664,15 @@ def get_users(
         query = query.filter(User.name.ilike(f"%{name}%"))
     if department:
         query = query.filter(User.department.ilike(f"%{department}%"))
-    return query.all()
+    
+    users = query.all()
+    # Populate roles
+    for user in users:
+        # Find role for this user and org
+        user_role = next((r for r in user.roles if r.org_id == current_user.org_id), None)
+        user.role = user_role.role if user_role else Role.intern # Default to intern
+        
+    return users
 
 @app.get("/users/{user_id}", response_model=UserResponse)
 def get_user(
@@ -671,19 +680,34 @@ def get_user(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    user = db.query(User).filter(User.id == user_id).first()
+    # Filter by org_id for tenant isolation
+    user = db.query(User).filter(User.id == user_id, User.org_id == current_user.org_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+        
+    # Populate role
+    user_role = next((r for r in user.roles if r.org_id == current_user.org_id), None)
+    user.role = user_role.role if user_role else Role.intern
+    
     return user
 
 @app.put("/users/{user_id}", response_model=UserResponse)
 def update_user(
     user_id: int,
     user_data: UserUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    context = Depends(get_current_user_with_role),
+    db: Session = Depends(get_db)
 ):
-    user = db.query(User).filter(User.id == user_id).first()
+    from server.permissions import can_manage_users
+    
+    current_user = context["user"]
+    current_role = context["role"]
+    
+    # Check permission: User can update themselves, or Manager+ can update anyone
+    if current_user.id != user_id and not can_manage_users(current_role):
+         raise HTTPException(status_code=403, detail="Permission denied: Cannot update other users")
+    # Filter by org_id for tenant isolation
+    user = db.query(User).filter(User.id == user_id, User.org_id == current_user.org_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
@@ -700,10 +724,19 @@ def update_user(
 @app.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_user(
     user_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    context = Depends(get_current_user_with_role),
+    db: Session = Depends(get_db)
 ):
-    user = db.query(User).filter(User.id == user_id).first()
+    from server.permissions import can_manage_users
+    
+    current_user = context["user"]
+    current_role = context["role"]
+    
+    # Check permission
+    if not can_manage_users(current_role):
+        raise HTTPException(status_code=403, detail="Permission denied: Manager+ role required")
+    # Filter by org_id for tenant isolation
+    user = db.query(User).filter(User.id == user_id, User.org_id == current_user.org_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
@@ -1152,10 +1185,18 @@ def cancel_task(
 def assign_task(
     task_id: int,
     assign_data: TaskAssign,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    context = Depends(get_current_user_with_role),
+    db: Session = Depends(get_db)
 ):
-    task = db.query(Task).filter(Task.id == task_id).first()
+    from server.permissions import can_assign_task
+    
+    current_user = context["user"]
+    current_role = context["role"]
+    
+    # Check permission
+    if not can_assign_task(current_role):
+        raise HTTPException(status_code=403, detail="Permission denied: Manager+ role required")
+    task = db.query(Task).filter(Task.id == task_id, Task.org_id == current_user.org_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
@@ -1163,7 +1204,8 @@ def assign_task(
     if task.status == TaskStatus.cancelled:
         raise HTTPException(status_code=403, detail="Cannot modify cancelled task")
     
-    user = db.query(User).filter(User.id == assign_data.user_id).first()
+    # Ensure assigned user is in the same org
+    user = db.query(User).filter(User.id == assign_data.user_id, User.org_id == current_user.org_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
@@ -1207,10 +1249,18 @@ def assign_task(
 def assign_task_multiple(
     task_id: int,
     assign_data: TaskAssignMultiple,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    context = Depends(get_current_user_with_role),
+    db: Session = Depends(get_db)
 ):
-    task = db.query(Task).filter(Task.id == task_id).first()
+    from server.permissions import can_assign_task
+    
+    current_user = context["user"]
+    current_role = context["role"]
+    
+    # Check permission
+    if not can_assign_task(current_role):
+        raise HTTPException(status_code=403, detail="Permission denied: Manager+ role required")
+    task = db.query(Task).filter(Task.id == task_id, Task.org_id == current_user.org_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
@@ -1219,7 +1269,8 @@ def assign_task_multiple(
         raise HTTPException(status_code=403, detail="Cannot modify cancelled task")
     
     for user_id in assign_data.user_ids:
-        user = db.query(User).filter(User.id == user_id).first()
+        # Check if user exists and belongs to the same org
+        user = db.query(User).filter(User.id == user_id, User.org_id == current_user.org_id).first()
         if not user:
             continue
         
@@ -1255,11 +1306,19 @@ def assign_task_multiple(
 def unassign_task(
     task_id: int,
     unassign_data: TaskUnassign,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    context = Depends(get_current_user_with_role),
+    db: Session = Depends(get_db)
 ):
+    from server.permissions import can_assign_task
+    
+    current_user = context["user"]
+    current_role = context["role"]
+    
+    # Check permission
+    if not can_assign_task(current_role):
+        raise HTTPException(status_code=403, detail="Permission denied: Manager+ role required")
     # Check if task exists and is not cancelled
-    task = db.query(Task).filter(Task.id == task_id).first()
+    task = db.query(Task).filter(Task.id == task_id, Task.org_id == current_user.org_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     if task.status == TaskStatus.cancelled:
@@ -1284,7 +1343,7 @@ def get_task_assignments(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    task = db.query(Task).filter(Task.id == task_id).first()
+    task = db.query(Task).filter(Task.id == task_id, Task.org_id == current_user.org_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
@@ -1303,16 +1362,24 @@ def get_task_assignments(
 def add_checklist_item(
     task_id: int,
     item: ChecklistItem,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    context = Depends(get_current_user_with_role),
+    db: Session = Depends(get_db)
 ):
-    task = db.query(Task).filter(Task.id == task_id).first()
+    from server.permissions import can_update_assigned_task
+    
+    current_user = context["user"]
+    current_role = context["role"]
+    task = db.query(Task).filter(Task.id == task_id, Task.org_id == current_user.org_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
     # Prevent operations on cancelled tasks
     if task.status == TaskStatus.cancelled:
         raise HTTPException(status_code=403, detail="Cannot modify cancelled task")
+        
+    # Check permission
+    if not can_update_assigned_task(current_user.id, task, current_role):
+        raise HTTPException(status_code=403, detail="Permission denied: not authorized to update this task")
     
     checklist = task.checklist or []
     checklist.append(item.dict())
@@ -1327,16 +1394,24 @@ def add_checklist_item(
 def update_checklist_item(
     task_id: int,
     update_data: ChecklistUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    context = Depends(get_current_user_with_role),
+    db: Session = Depends(get_db)
 ):
-    task = db.query(Task).filter(Task.id == task_id).first()
+    from server.permissions import can_update_assigned_task
+    
+    current_user = context["user"]
+    current_role = context["role"]
+    task = db.query(Task).filter(Task.id == task_id, Task.org_id == current_user.org_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
     # Prevent operations on cancelled tasks
     if task.status == TaskStatus.cancelled:
         raise HTTPException(status_code=403, detail="Cannot modify cancelled task")
+    
+    # Check permission
+    if not can_update_assigned_task(current_user.id, task, current_role):
+        raise HTTPException(status_code=403, detail="Permission denied: not authorized to update this task")
     
     checklist = task.checklist or []
     if update_data.index >= len(checklist):
@@ -1358,16 +1433,24 @@ def update_checklist_item(
 def remove_checklist_item(
     task_id: int,
     remove_data: ChecklistRemove,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    context = Depends(get_current_user_with_role),
+    db: Session = Depends(get_db)
 ):
-    task = db.query(Task).filter(Task.id == task_id).first()
+    from server.permissions import can_update_assigned_task
+    
+    current_user = context["user"]
+    current_role = context["role"]
+    task = db.query(Task).filter(Task.id == task_id, Task.org_id == current_user.org_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
     # Prevent operations on cancelled tasks
     if task.status == TaskStatus.cancelled:
         raise HTTPException(status_code=403, detail="Cannot modify cancelled task")
+        
+    # Check permission
+    if not can_update_assigned_task(current_user.id, task, current_role):
+        raise HTTPException(status_code=403, detail="Permission denied: not authorized to update this task")
     
     checklist = task.checklist or []
     if remove_data.index >= len(checklist):
@@ -1390,7 +1473,8 @@ def create_message(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    message = Message(**message_data.dict())
+    # Auto-set org_id from current user
+    message = Message(**message_data.dict(), org_id=current_user.org_id)
     db.add(message)
     db.commit()
     db.refresh(message)
@@ -1405,7 +1489,8 @@ def get_messages(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    query = db.query(Message)
+    # Filter by org_id for tenant isolation
+    query = db.query(Message).filter(Message.org_id == current_user.org_id)
     
     if user_id is not None:
         query = query.filter(Message.user_id == user_id)

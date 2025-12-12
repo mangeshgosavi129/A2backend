@@ -6,6 +6,8 @@ import os
 import time
 import re
 import logging
+from datetime import datetime
+import pytz
 
 load_dotenv(dotenv_path=Path(__file__).with_name(".env"))
 
@@ -144,8 +146,6 @@ def chat_with_mcp(
         content = msg.get("content", "")
         history_str += f"{role}: {content}\n"
 
-    final_prompt = f"Context: {context_instruction}\nHistory:\n{history_str}\n\nUser: {prompt}"
-    
     # Construct dynamic context prompt
     user_id = user_context.get("user_id", "Unknown")
     org_id = user_context.get("org_id", "Unknown")
@@ -162,6 +162,12 @@ def chat_with_mcp(
     Example: create_task(title="...", requesting_user_id={user_id}, requesting_org_id={org_id})
     FAILURE TO PASS THESE will result in actions being performed as the wrong user/org!
     """
+
+    # Get current time in IST
+    ist_tz = pytz.timezone('Asia/Kolkata')
+    current_time_ist = datetime.now(ist_tz).strftime('%Y-%m-%d %H:%M:%S')
+
+    final_prompt = f"DateTime: {current_time_ist}\nContext: {context_instruction}\nHistory:\n{history_str}\n\nUser: {prompt}"
 
     if user_context.get("state") == "creating_task":
         context_instruction += "\nThe user is currently creating a task. Ask for missing details if needed.\n"
