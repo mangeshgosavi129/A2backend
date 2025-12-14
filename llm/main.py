@@ -149,18 +149,19 @@ def chat_with_mcp(
     # Construct dynamic context prompt
     user_id = user_context.get("user_id", "Unknown")
     org_id = user_context.get("org_id", "Unknown")
+    auth_token = user_context.get("auth_token", "Unknown")
     
     context_instruction = f"""
     Default actor is current user (id {user_id}).
     Current Organisation ID: {org_id}
 
     === CRITICAL AUTHENTICATION RULE ===
-    For EVERY tool call, you MUST pass these two parameters to identify the user:
-    - `requesting_user_id`: {user_id}
-    - `requesting_org_id`: {org_id}
+    For EVERY tool call, you MUST pass this token to authenticate:
+    - `auth_token`: "{auth_token}"
 
-    Example: create_task(title="...", requesting_user_id={user_id}, requesting_org_id={org_id})
-    FAILURE TO PASS THESE will result in actions being performed as the wrong user/org!
+    Example: create_task(title="...", auth_token="{auth_token}")
+    FAILURE TO PASS THIS will result in failed actions!
+    DO NOT pass requesting_user_id or requesting_org_id anymore.
     """
 
     # Get current time in IST

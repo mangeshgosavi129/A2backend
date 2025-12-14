@@ -275,12 +275,17 @@ def _generate_response(user_id: int, text: str, db: Session) -> str:
         state = get_last_state(db, user_id)
         
         # 3. Construct Context Dict
+        # Generate short-lived auth token for this interaction
+        from server.security_utils import create_access_token
+        auth_token = create_access_token(data={"sub": str(user_id), "org_id": org_id})
+
         user_context = {
             "user_id": user_id,
             "org_id": org_id,
             "user_name": user_name,
             "department": user_dept,
-            "state": state.get("state", "idle")
+            "state": state.get("state", "idle"),
+            "auth_token": auth_token  # Pass trusted token to LLM
         }
         
         # 4. Call LLM

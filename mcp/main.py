@@ -15,25 +15,17 @@ mcp = FastMCP("urbounce-tasks", port=8001)
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"
 
-def get_auth_headers(user_id: Optional[int] = None, org_id: Optional[int] = None) -> dict:
+def get_auth_headers(auth_token: str) -> dict:
     """
-    Generate auth headers. 
-    If user_id/org_id provided, generate a fresh token for that user.
-    Otherwise fall back to the global env token.
+    Generate auth headers using the provided valid JWT token.
     """
-    if user_id and SECRET_KEY:
-        expire = datetime.utcnow() + timedelta(minutes=5)
-        to_encode = {
-            "sub": str(user_id),
-            "exp": expire
-        }
-        if org_id:
-            to_encode["org_id"] = org_id
-            
-        dynamic_token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-        return {"Authorization": f"Bearer {dynamic_token}"}
+    if auth_token:
+        # If token doesn't start with Bearer, add it
+        if not auth_token.startswith("Bearer "):
+            return {"Authorization": f"Bearer {auth_token}"}
+        return {"Authorization": auth_token}
         
-    return {"Authorization": f"Bearer {token}"}
+    return {}
 
 # =========================================================
 # HELPER FUNCTION: Response Wrapper
@@ -57,18 +49,18 @@ def mcp_response(success: bool, data: dict, instructions: str = "", error: str =
 # USER ENDPOINTS
 # =========================================================
 @mcp.tool()
-async def list_users(requesting_user_id: int = None, requesting_org_id: int = None):
+async def list_users(auth_token: str):
     """List all users in your organisation. Use this to get the user_id of the assignee."""
-    AUTH_HEADER = get_auth_headers(requesting_user_id, requesting_org_id)
+    AUTH_HEADER = get_auth_headers(auth_token)
     async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
         resp = await client.get("/users")
         resp.raise_for_status()
         return resp.json()
 
 @mcp.tool()
-async def get_user(user_id: int, requesting_user_id: int = None, requesting_org_id: int = None):
+async def get_user(user_id: int, auth_token: str):
     """Get a user by ID"""
-    AUTH_HEADER = get_auth_headers(requesting_user_id, requesting_org_id)
+    AUTH_HEADER = get_auth_headers(auth_token)
     async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
         resp = await client.get(f"/users/{user_id}")
         if resp.status_code == 404:
@@ -101,9 +93,9 @@ async def get_user(user_id: int, requesting_user_id: int = None, requesting_org_
 # CLIENT ENDPOINTS
 # =========================================================
 @mcp.tool()
-async def create_client(name: str, phone: Optional[str] = None, project_name: Optional[str] = None, requesting_user_id: int = None, requesting_org_id: int = None):
+async def create_client(name: str, auth_token: str, phone: Optional[str] = None, project_name: Optional[str] = None):
     """Create a new client"""
-    AUTH_HEADER = get_auth_headers(requesting_user_id, requesting_org_id)
+    AUTH_HEADER = get_auth_headers(auth_token)
     async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
         resp = await client.post(
             "/clients",
@@ -117,18 +109,18 @@ async def create_client(name: str, phone: Optional[str] = None, project_name: Op
         return resp.json()
 
 @mcp.tool()
-async def list_clients(requesting_user_id: int = None, requesting_org_id: int = None):
+async def list_clients(auth_token: str):
     """List all clients"""
-    AUTH_HEADER = get_auth_headers(requesting_user_id, requesting_org_id)
+    AUTH_HEADER = get_auth_headers(auth_token)
     async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
         resp = await client.get("/clients")
         resp.raise_for_status()
         return resp.json()
 
 @mcp.tool()
-async def get_client(client_id: int, requesting_user_id: int = None, requesting_org_id: int = None):
+async def get_client(client_id: int, auth_token: str):
     """Get a client by ID"""
-    AUTH_HEADER = get_auth_headers(requesting_user_id, requesting_org_id)
+    AUTH_HEADER = get_auth_headers(auth_token)
     async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
         resp = await client.get(f"/clients/{client_id}")
         if resp.status_code == 404:
@@ -137,9 +129,9 @@ async def get_client(client_id: int, requesting_user_id: int = None, requesting_
         return resp.json()
 
 @mcp.tool()
-async def update_client(client_id: int, name: Optional[str] = None, phone: Optional[str] = None, project_name: Optional[str] = None, requesting_user_id: int = None, requesting_org_id: int = None):
+async def update_client(client_id: int, auth_token: str, name: Optional[str] = None, phone: Optional[str] = None, project_name: Optional[str] = None):
     """Update a client's details"""
-    AUTH_HEADER = get_auth_headers(requesting_user_id, requesting_org_id)
+    AUTH_HEADER = get_auth_headers(auth_token)
     payload = {
         k: v for k, v in {
             "name": name,
@@ -171,19 +163,18 @@ async def update_client(client_id: int, name: Optional[str] = None, phone: Optio
 async def create_and_assign_task(
     title: str,
     assignee_user_id: int,
+    auth_token: str,
     client_id: Optional[int] = None,
     description: Optional[str] = None,
     status: Optional[str] = None,
     priority: Optional[str] = None,
     deadline: Optional[str] = None,
-    progress_percentage: Optional[int] = None,
-    requesting_user_id: int = None,
-    requesting_org_id: int = None
+    progress_percentage: Optional[int] = None
 ):
     """Create task AND assign to user in ONE operation. Use this when assignee is known.
     Status: assigned|in_progress|on_hold|completed|cancelled|overdue. Priority: high|medium|low
     All optional parameters have sensible defaults if not provided."""
-    AUTH_HEADER = get_auth_headers(requesting_user_id, requesting_org_id)
+    AUTH_HEADER = get_auth_headers(auth_token)
     try:
         # Step 1: Apply defaults and filter null values
         payload = {
@@ -281,9 +272,9 @@ async def create_and_assign_task(
 #         )
 
 @mcp.tool()
-async def list_tasks(requesting_user_id: int = None, requesting_org_id: int = None):
+async def list_tasks(auth_token: str):
     """List all tasks. Cancelled tasks are excluded (soft deleted). Each task has 'id' for use with update_task, get_task, assign_task, etc."""
-    AUTH_HEADER = get_auth_headers(requesting_user_id, requesting_org_id)
+    AUTH_HEADER = get_auth_headers(auth_token)
     try:
         async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
             resp = await client.get("/tasks")
@@ -303,9 +294,9 @@ async def list_tasks(requesting_user_id: int = None, requesting_org_id: int = No
         )
 
 @mcp.tool()
-async def get_task(task_id: int, requesting_user_id: int = None, requesting_org_id: int = None):
+async def get_task(task_id: int, auth_token: str):
     """Get task by ID. Cancelled tasks are treated as soft deleted and will return 404."""
-    AUTH_HEADER = get_auth_headers(requesting_user_id, requesting_org_id)
+    AUTH_HEADER = get_auth_headers(auth_token)
     try:
         async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
             resp = await client.get(f"/tasks/{task_id}")
@@ -342,7 +333,8 @@ async def get_task(task_id: int, requesting_user_id: int = None, requesting_org_
 
 @mcp.tool()
 async def update_task(
-    task_id: int, 
+    task_id: int,
+    auth_token: str, 
     title: Optional[str] = None, 
     description: Optional[str] = None, 
     status: Optional[str] = None,
@@ -350,14 +342,12 @@ async def update_task(
     deadline: Optional[str] = None,
     end_datetime: Optional[str] = None,
     progress_description: Optional[str] = None,
-    progress_percentage: Optional[int] = None,
-    requesting_user_id: int = None,
-    requesting_org_id: int = None
+    progress_percentage: Optional[int] = None
 ):
     """Use to update an existing task. Cancelled tasks cannot be updated (soft deleted).
     Use in scenarios where either a task is created without sufficient details and user adds them in successive messages or user simply wants to modify an existing task.
     Status: assigned|in_progress|on_hold|completed|cancelled|overdue. Priority: high|medium|low"""
-    AUTH_HEADER = get_auth_headers(requesting_user_id, requesting_org_id)
+    AUTH_HEADER = get_auth_headers(auth_token)
     try:
         # Filter out None values - already correct
         payload = {
@@ -414,9 +404,9 @@ async def update_task(
         )
 
 @mcp.tool()
-async def cancel_task(task_id: int, cancellation_reason: str, requesting_user_id: int = None, requesting_org_id: int = None):
+async def cancel_task(task_id: int, cancellation_reason: str, auth_token: str):
     """Cancel task with reason"""
-    AUTH_HEADER = get_auth_headers(requesting_user_id, requesting_org_id)
+    AUTH_HEADER = get_auth_headers(auth_token)
     try:
         async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
             resp = await client.post(
@@ -570,9 +560,9 @@ async def cancel_task(task_id: int, cancellation_reason: str, requesting_user_id
 # CHECKLIST ENDPOINTS
 # =========================================================
 @mcp.tool()
-async def add_checklist_item(task_id: int, text: str, completed: bool = False, requesting_user_id: int = None, requesting_org_id: int = None):
+async def add_checklist_item(task_id: int, text: str, auth_token: str, completed: bool = False):
     """Add checklist item to task"""
-    AUTH_HEADER = get_auth_headers(requesting_user_id, requesting_org_id)
+    AUTH_HEADER = get_auth_headers(auth_token)
     try:
         async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
             resp = await client.post(
@@ -603,9 +593,9 @@ async def add_checklist_item(task_id: int, text: str, completed: bool = False, r
         )
 
 @mcp.tool()
-async def update_checklist_item(task_id: int, index: int, text: Optional[str] = None, completed: Optional[bool] = None, requesting_user_id: int = None, requesting_org_id: int = None):
+async def update_checklist_item(task_id: int, index: int, auth_token: str, text: Optional[str] = None, completed: Optional[bool] = None):
     """Update a checklist item by index"""
-    AUTH_HEADER = get_auth_headers(requesting_user_id, requesting_org_id)
+    AUTH_HEADER = get_auth_headers(auth_token)
     payload = {
         k: v for k, v in {"index": index, "text": text, "completed": completed}.items() if v is not None
     }
@@ -622,9 +612,9 @@ async def update_checklist_item(task_id: int, index: int, text: Optional[str] = 
         return resp.json()
 
 @mcp.tool()
-async def remove_checklist_item(task_id: int, index: int, requesting_user_id: int = None, requesting_org_id: int = None):
+async def remove_checklist_item(task_id: int, index: int, auth_token: str):
     """Remove a checklist item by index"""
-    AUTH_HEADER = get_auth_headers(requesting_user_id, requesting_org_id)
+    AUTH_HEADER = get_auth_headers(auth_token)
     async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
         request = httpx.Request("DELETE", f"{API_BASE}/tasks/{task_id}/checklist/remove", json={"index": index}, headers=AUTH_HEADER)
         resp = await client.send(request)
