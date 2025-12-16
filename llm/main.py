@@ -130,7 +130,7 @@ def chat_with_mcp(
     Args:
         prompt: User's current message
         history: Conversation history
-        user_context: Context dict containing 'user_id', 'org_id', 'user_name', 'current_time', 'state'
+        user_context: Context dict containing 'user_name', 'current_time', 'state', 'auth_token'
         max_retries: Number of retry attempts for failed tool calls (default: 2)
     
     Returns:
@@ -147,14 +147,9 @@ def chat_with_mcp(
         history_str += f"{role}: {content}\n"
 
     # Construct dynamic context prompt
-    user_id = user_context.get("user_id", "Unknown")
-    org_id = user_context.get("org_id", "Unknown")
     auth_token = user_context.get("auth_token", "Unknown")
     
     context_instruction = f"""
-    Default actor is current user (id {user_id}).
-    Current Organisation ID: {org_id}
-
     === CRITICAL AUTHENTICATION RULE ===
     For EVERY tool call, you MUST pass this token to authenticate:
     - `auth_token`: "{auth_token}"
@@ -240,6 +235,5 @@ def chat_with_mcp(
 if __name__ == "__main__":
     user_text = "List all users"
     # Example context for testing
-    ctx = {"user_id": 1, "org_id": 1, "state": "idle"}
     response = chat_with_mcp(user_text, user_context=ctx)
     print(response)

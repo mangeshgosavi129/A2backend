@@ -277,11 +277,9 @@ def _generate_response(user_id: int, text: str, db: Session) -> str:
         # 3. Construct Context Dict
         # Generate short-lived auth token for this interaction
         from server.security_utils import create_access_token
-        auth_token = create_access_token(data={"sub": str(user_id), "org_id": org_id})
+        auth_token = create_access_token(data={"sub": str(user_id), "org_id": org_id}, timedelta=timedelta(minutes=5))
 
         user_context = {
-            "user_id": user_id,
-            "org_id": org_id,
             "user_name": user_name,
             "department": user_dept,
             "state": state.get("state", "idle"),
