@@ -154,16 +154,32 @@ def chat_with_mcp(
 
     # Construct dynamic context prompt
     auth_token = user_context.get("auth_token", "Unknown")
+    user_name = user_context.get("user_name", "User")
+    user_role = user_context.get("user_role", "employee")
+    department = user_context.get("department", "")
+    
+    # Role-based permission hint
+    if user_role in ["intern", "employee"]:
+        role_hint = "You can only update tasks assigned to you. You cannot assign tasks to others."
+    else:
+        role_hint = "You can manage all tasks and assign tasks to team members."
     
     context_instruction = f"""
-    === CRITICAL AUTHENTICATION RULE ===
-    For EVERY tool call, you MUST pass this token to authenticate:
-    - `auth_token`: "{auth_token}"
+=== YOUR IDENTITY ===
+You are helping: {user_name} ({user_role})
+Department: {department}
 
-    Example: create_task(title="...", auth_token="{auth_token}")
-    FAILURE TO PASS THIS will result in failed actions!
-    DO NOT pass requesting_user_id or requesting_org_id anymore.
-    """
+=== ROLE PERMISSIONS ===
+{role_hint}
+
+=== LANGUAGE ===
+Respond in the SAME language the user speaks (Hindi, Marathi, or English).
+Keep replies concise and friendly.
+
+=== AUTH TOKEN (REQUIRED FOR ALL TOOLS) ===
+For EVERY tool call, pass: auth_token="{auth_token}"
+Do NOT pass requesting_user_id or requesting_org_id.
+"""
 
     # Get current time in IST
     ist_tz = pytz.timezone('Asia/Kolkata')

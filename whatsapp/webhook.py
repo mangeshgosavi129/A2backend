@@ -272,6 +272,11 @@ def _generate_response(user_id: int, text: str, db: Session) -> str:
         user_dept = user.department if user.department else "N/A"
         org_id = user.org_id
         
+        # Fetch user role for RBAC-aware prompting
+        from server.permissions import get_user_role_in_org
+        user_role = get_user_role_in_org(db, user_id, org_id)
+        user_role_str = user_role.value if user_role else "intern"
+        
         # 1. Fetch History
         history = get_chat_history(db, user_id)
         
@@ -285,9 +290,10 @@ def _generate_response(user_id: int, text: str, db: Session) -> str:
 
         user_context = {
             "user_name": user_name,
+            "user_role": user_role_str,
             "department": user_dept,
             "state": state.get("state", "idle"),
-            "auth_token": auth_token  # Pass trusted token to LLM
+            "auth_token": auth_token
         }
         
         # 4. Call LLM
