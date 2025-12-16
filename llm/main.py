@@ -120,8 +120,8 @@ Never hallucinate tool names or parameters
 
 def chat_with_mcp(
     prompt: str, 
-    history: List[dict] = [], 
-    user_context: dict = {},
+    history: List[dict] = None, 
+    user_context: dict = None,
     max_retries: int = 2
 ) -> str:
     """
@@ -138,6 +138,12 @@ def chat_with_mcp(
     """
     api_key = os.getenv("GROQ_API_KEY")
     client = openai.OpenAI(api_key=api_key, base_url="https://api.groq.com/openai/v1")
+
+    # Handle None defaults
+    if history is None:
+        history = []
+    if user_context is None:
+        user_context = {}
 
     # Format history into a string
     history_str = ""
@@ -163,10 +169,11 @@ def chat_with_mcp(
     ist_tz = pytz.timezone('Asia/Kolkata')
     current_time_ist = datetime.now(ist_tz).strftime('%Y-%m-%d %H:%M:%S')
 
-    final_prompt = f"DateTime: {current_time_ist}\nContext: {context_instruction}\nHistory:\n{history_str}\n\nUser: {prompt}"
-
+    # Add state-specific context BEFORE building final_prompt
     if user_context.get("state") == "creating_task":
         context_instruction += "\nThe user is currently creating a task. Ask for missing details if needed.\n"
+
+    final_prompt = f"DateTime: {current_time_ist}\nContext: {context_instruction}\nHistory:\n{history_str}\n\nUser: {prompt}"
 
     kwargs = dict(
         model="openai/gpt-oss-20b",
@@ -189,26 +196,8 @@ def chat_with_mcp(
         try:
             logger.info(f"Sending prompt to LLM: {final_prompt[:200]}... [truncated]")
             
-            response = client.chat.completions.create(**kwargs)
-            logger.info(f"Raw LLM Response Object: {response}")
-
-            # Check for tool calls
-            if response.choices[0].message.tool_calls:
-                for tc in response.choices[0].message.tool_calls:
-                     logger.info(f"Tool Call Requested: {tc.function.name} with args {tc.function.arguments}")
-
-            # If the library handles execution automatically (which this weird .responses.create might imply?), 
-            # we need to see the result. But since I suspect this is standard OpenAI,
-            # we need to handle tool execution manually or see what this responses.create does.
-            # WAIT. The user code had `client.responses.create`. I changed it to `client.chat.completions.create` 
-            # because `responses` is not standard. If the user's code WAS working, then `responses` might be correct for their setup?
-            # BUT, the logs show "AttributeError" or similar? No, logs showed success.
-            # Let me stick to the existing method name `responses` if it works, BUT wrap it with logging.
-            # actually, I will revert to `responses` to avoid breaking if it's a special client, 
-            # but I will add the logging AROUND it.
-            
             response = client.responses.create(**kwargs)
-            logger.info(f"LLM response output: {response.output}") # Log the output specifically
+            logger.info(f"LLM response output: {response.output}")
             
             # Sanitize tool calls to handle gpt-oss-20b corruption
             response = sanitize_tool_calls(response)
@@ -258,5 +247,6 @@ def chat_with_mcp(
 if __name__ == "__main__":
     user_text = "List all users"
     # Example context for testing
+    ctx = {"auth_token": "test-token", "state": "idle"}
     response = chat_with_mcp(user_text, user_context=ctx)
     print(response)
