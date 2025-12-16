@@ -2,7 +2,7 @@ import logging
 import json
 import requests
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 from typing import Mapping, Optional, Tuple, List
 from sqlalchemy.orm import Session
@@ -277,7 +277,7 @@ def _generate_response(user_id: int, text: str, db: Session) -> str:
         # 3. Construct Context Dict
         # Generate short-lived auth token for this interaction
         from server.security_utils import create_access_token
-        auth_token = create_access_token(data={"sub": str(user_id), "org_id": org_id}, timedelta=timedelta(minutes=5))
+        auth_token = create_access_token(data={"sub": str(user_id), "org_id": org_id}, expires_delta=timedelta(minutes=5))
 
         user_context = {
             "user_name": user_name,
