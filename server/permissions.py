@@ -82,7 +82,7 @@ def can_modify_user_role(requester_role: Role, target_role: Role) -> bool:
 
 def get_user_role_in_org(db: Session, user_id: int, org_id: int) -> Optional[Role]:
     """Get user's role in specified organisation"""
-    from server.main import UserRole as UserRoleModel
+    from whatsapp.database import UserRole as UserRoleModel
     
     user_role = db.query(UserRoleModel).filter(
         and_(
