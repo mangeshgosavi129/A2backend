@@ -264,9 +264,13 @@ def _generate_response(user_id: int, text: str, db: Session) -> str:
     try:
         # 0. Get User Info
         user = db.query(User).filter(User.id == user_id).first()
-        user_name = user.name if user else "Unknown"
-        user_dept = user.department if user and user.department else "N/A"
-        org_id = user.org_id if user else None
+        if not user:
+            logger.error(f"User {user_id} not found in _generate_response")
+            return "⚠️ Error: User not found."
+        
+        user_name = user.name
+        user_dept = user.department if user.department else "N/A"
+        org_id = user.org_id
         
         # 1. Fetch History
         history = get_chat_history(db, user_id)
@@ -314,6 +318,13 @@ def process_audio_async(
     """
     db = SessionLocal()
     try:
+        # Fetch user for org_id
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            logger.error(f"User {user_id} not found for audio processing")
+            send_whatsapp_text(sender_waid, "⚠️ Error: User not found.", config=config)
+            return
+        
         # Transcribe audio using Groq
         logger.info("Starting audio transcription in background with Groq...")
         text_body = transcribe_sarvam_audio(audio_binary)
@@ -406,7 +417,7 @@ def handle_webhook(
                 return {"status": "ok"}, 200
 
         contacts = value.get("contacts", [])
-        sender_waid = contacts[0].get("wa_id") if contacts else msg.get("from")
+        sender_waid = contacts[0].get("wa_id") if contacts and len(contacts) > 0 else msg.get("from")
         
         text_body = None
         
@@ -475,7 +486,7 @@ def handle_webhook(
             else:
                 reply = "Welcome! I don't recognize this phone number. Please contact support to register."
 
-            print(f"Response generated: {reply}")
+            logger.info(f"Response generated: {reply}")
 
             # PERSIST RESPONSE (OUT)
             if user_id:

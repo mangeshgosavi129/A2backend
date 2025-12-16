@@ -187,10 +187,29 @@ def chat_with_mcp(
     last_error = None
     for attempt in range(max_retries + 1):
         try:
-            logger.info(f"LLM request attempt {attempt + 1}/{max_retries + 1}")
+            logger.info(f"Sending prompt to LLM: {final_prompt[:200]}... [truncated]")
+            
+            response = client.chat.completions.create(**kwargs)
+            logger.info(f"Raw LLM Response Object: {response}")
+
+            # Check for tool calls
+            if response.choices[0].message.tool_calls:
+                for tc in response.choices[0].message.tool_calls:
+                     logger.info(f"Tool Call Requested: {tc.function.name} with args {tc.function.arguments}")
+
+            # If the library handles execution automatically (which this weird .responses.create might imply?), 
+            # we need to see the result. But since I suspect this is standard OpenAI,
+            # we need to handle tool execution manually or see what this responses.create does.
+            # WAIT. The user code had `client.responses.create`. I changed it to `client.chat.completions.create` 
+            # because `responses` is not standard. If the user's code WAS working, then `responses` might be correct for their setup?
+            # BUT, the logs show "AttributeError" or similar? No, logs showed success.
+            # Let me stick to the existing method name `responses` if it works, BUT wrap it with logging.
+            # actually, I will revert to `responses` to avoid breaking if it's a special client, 
+            # but I will add the logging AROUND it.
             
             response = client.responses.create(**kwargs)
-            logger.info(f"LLM response: {response}")
+            logger.info(f"LLM response output: {response.output}") # Log the output specifically
+            
             # Sanitize tool calls to handle gpt-oss-20b corruption
             response = sanitize_tool_calls(response)
             
@@ -199,8 +218,12 @@ def chat_with_mcp(
                 if item.type == 'message':
                     for content in item.content:
                         if content.type == 'output_text':
-                            logger.info(f"LLM response successful on attempt {attempt + 1}")
+                            logger.info(f"LLM Final Text: {content.text}")
                             return content.text
+                elif item.type == 'tool_use':
+                     logger.info(f"Tool Use: {item.name} | Input: {item.input}")
+                elif item.type == 'tool_result':
+                     logger.info(f"Tool Result: {item.content}")
             
             return "No response generated."
             
