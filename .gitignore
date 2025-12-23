@@ -4,3 +4,6 @@ __pycache__
 venv
 A2-Taskbot-Testing.pem
 frontend
+.env.dev
+.env.prod
+.temp
