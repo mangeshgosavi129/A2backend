@@ -1,13 +1,12 @@
 import json
 import logging
-from typing import Mapping, Tuple, Optional
+from typing import Mapping, Tuple
 import requests
-from .config import WhatsAppConfig
-
+from .config import config
 # Setup logger
 logger = logging.getLogger(__name__)
 
-def _api_url(config: WhatsAppConfig) -> str:
+def _api_url() -> str:
     return f"https://graph.facebook.com/{config.VERSION}/{config.PHONE_NUMBER_ID}/messages"
 
 def _get_text_payload(recipient: str, text: str) -> str:
@@ -23,8 +22,7 @@ def _get_text_payload(recipient: str, text: str) -> str:
 
 def send_whatsapp_text(
     to: str, 
-    text: str, 
-    config: Optional[WhatsAppConfig] = None
+    text: str
 ) -> Tuple[Mapping, int]:
     """
     Sends a WhatsApp message.
@@ -32,30 +30,24 @@ def send_whatsapp_text(
     Arguments:
         to (str): The recipient's phone number.
         text (str): The message body.
-        config (WhatsAppConfig, optional): Dependency injection for config.
+        config (WhatsAppSendConfig, optional): Dependency injection for config.
     """
-    # Initialize config if not provided (prevents crash if called without it)
-    if config is None:
-        cfg = WhatsAppConfig()
-    else:
-        cfg = config
-
     recipient = to
     
     # Validation
-    if not (cfg.ACCESS_TOKEN and cfg.VERSION and cfg.PHONE_NUMBER_ID and recipient):
+    if not (config.ACCESS_TOKEN and config.VERSION and config.PHONE_NUMBER_ID and recipient):
         logger.error("Missing WhatsApp configuration or recipient")
         return {"status": "error", "message": "Missing configuration"}, 500
 
     headers = {
         "Content-type": "application/json",
-        "Authorization": f"Bearer {cfg.ACCESS_TOKEN}",
+        "Authorization": f"Bearer {config.ACCESS_TOKEN}",
     }
 
     try:
         # Timeout increased to 15s
         resp = requests.post(
-            _api_url(cfg), 
+            _api_url(), 
             data=_get_text_payload(recipient, text), 
             headers=headers, 
             timeout=15
@@ -70,9 +62,6 @@ def send_whatsapp_text(
     except requests.RequestException as e:
         logger.error(f"WhatsApp send error: {e}")
         
-        # FIX: Check if 'resp' exists before accessing it to prevent UnboundLocalError
-        # 'resp' only exists if the server replied (e.g. 400/500 error). 
-        # It does NOT exist if the connection failed entirely (DNS/Network error).
         if 'resp' in locals():
              try:
                  return resp.json(), resp.status_code
@@ -80,14 +69,9 @@ def send_whatsapp_text(
                  pass # Fall through to generic error
         return {"status": "error", "message": "Failed to send message"}, 500
 
-def send_task_notification(phone: str, task_dict: dict, config: Optional[WhatsAppConfig] = None) -> Tuple[Mapping, int]:
+def send_task_notification(phone: str, task_dict: dict) -> Tuple[Mapping, int]:
     """
     Sends a WhatsApp notification when a task is assigned to a user.
-    
-    Arguments:
-        phone (str): The recipient's phone number.
-        task_dict (dict): Task details including title, description, priority, deadline.
-        config (WhatsAppConfig, optional): WhatsApp configuration.
     """
     # Format the notification message
     message = f"📋 *New Task Assigned*\n\n"
@@ -104,16 +88,11 @@ def send_task_notification(phone: str, task_dict: dict, config: Optional[WhatsAp
     message += f"\nTask ID: #{task_dict.get('id', 'N/A')}"
     
     # Send the notification
-    return send_whatsapp_text(phone, message, config)
+    return send_whatsapp_text(phone, message)
 
-def send_task_update_notification(phone: str, task_dict: dict, config: Optional[WhatsAppConfig] = None) -> Tuple[Mapping, int]:
+def send_task_update_notification(phone: str, task_dict: dict) -> Tuple[Mapping, int]:
     """
     Sends a WhatsApp notification when a task is updated.
-    
-    Arguments:
-        phone (str): The recipient's phone number.
-        task_dict (dict): Task details including title, status, priority, deadline.
-        config (WhatsAppConfig, optional): WhatsApp configuration.
     """
     # Format the notification message
     message = f"📝 *Task Updated*\n\n"
@@ -131,16 +110,11 @@ def send_task_update_notification(phone: str, task_dict: dict, config: Optional[
     message += f"\nTask ID: #{task_dict.get('id', 'N/A')}"
     
     # Send the notification
-    return send_whatsapp_text(phone, message, config)
+    return send_whatsapp_text(phone, message)
 
-def send_task_cancellation_notification(phone: str, task_dict: dict, config: Optional[WhatsAppConfig] = None) -> Tuple[Mapping, int]:
+def send_task_cancellation_notification(phone: str, task_dict: dict) -> Tuple[Mapping, int]:
     """
     Sends a WhatsApp notification when a task is cancelled.
-    
-    Arguments:
-        phone (str): The recipient's phone number.
-        task_dict (dict): Task details including title and cancellation_reason.
-        config (WhatsAppConfig, optional): WhatsApp configuration.
     """
     # Format the notification message
     message = f"❌ *Task Cancelled*\n\n"
@@ -152,4 +126,4 @@ def send_task_cancellation_notification(phone: str, task_dict: dict, config: Opt
     message += f"\nTask ID: #{task_dict.get('id', 'N/A')}"
     
     # Send the notification
-    return send_whatsapp_text(phone, message, config)
+    return send_whatsapp_text(phone, message)

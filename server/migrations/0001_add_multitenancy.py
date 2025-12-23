@@ -16,10 +16,9 @@ Run this script BEFORE starting the updated server.
 
 import os
 import sys
-from sqlalchemy import create_engine, text, Column, Integer, String, DateTime, ForeignKey, Enum as SQLEnum, Index
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
-from datetime import datetime
 
 # Load environment variables
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '../.env'))

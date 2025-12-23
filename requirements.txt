@@ -13,3 +13,5 @@ openai
 groq
 sarvamai
 prometheus-client
+boto3
+redis

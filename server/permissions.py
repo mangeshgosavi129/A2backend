@@ -1,21 +1,4 @@
-"""
-Permission checking and RBAC utilities for TaskBot.
-
-This module provides role-based access control checks for all operations.
-"""
-
-from enum import Enum
-from typing import Optional
-from sqlalchemy.orm import Session
-from sqlalchemy import and_
-
-# Import Role enum from main (avoid circular import by using string matching)
-class Role(str, Enum):
-    owner = "owner"
-    manager = "manager"
-    employee = "employee"
-    intern = "intern"
-
+from .enums import Role
 def can_create_task(role: Role) -> bool:
     """Check if role can create tasks"""
     return role in [Role.owner, Role.manager, Role.employee]
@@ -79,23 +62,6 @@ def can_modify_user_role(requester_role: Role, target_role: Role) -> bool:
     
     # Owners can modify anyone's role
     return True
-
-def get_user_role_in_org(db: Session, user_id: int, org_id: int) -> Optional[Role]:
-    """Get user's role in specified organisation"""
-    from whatsapp.database import UserRole as UserRoleModel
-    
-    user_role = db.query(UserRoleModel).filter(
-        and_(
-            UserRoleModel.user_id == user_id,
-            UserRoleModel.org_id == org_id
-        )
-    ).first()
-    
-    if user_role:
-        return user_role.role
-    
-    # Default to intern if no role found
-    return Role.intern
 
 def check_org_access(user_org_id: int, resource_org_id: int) -> bool:
     """Verify user has access to resource in same org"""

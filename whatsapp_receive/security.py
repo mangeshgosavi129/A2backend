@@ -1,15 +1,17 @@
 import hmac
 import hashlib
+import logging
 from typing import Mapping, Optional, Tuple
-from .config import WhatsAppConfig
+from .config import config
 
 def verify_webhook(params: Mapping[str, str]) -> Tuple[str | Mapping, int]:
-    cfg = WhatsAppConfig()
     mode = params.get("hub.mode")
     token = params.get("hub.verify_token")
     challenge = params.get("hub.challenge")
-    print("Verification began")
-    if mode and token and mode == "subscribe" and token == cfg.VERIFY_TOKEN and challenge:
+    logger = logging.getLogger(__name__)
+    logger.info("Verification began")
+    # Check if token matches
+    if mode and token and mode == "subscribe" and token == config.VERIFY_TOKEN and challenge:
         return str(challenge), 200
     if not (mode and token):
         return {"status": "error", "message": "Missing parameters"}, 400
@@ -23,4 +25,3 @@ def validate_signature(raw_body: bytes, headers: Mapping[str, str], app_secret: 
     provided = signature[7:]
     expected = hmac.new(bytes(app_secret, "latin-1"), msg=raw_body, digestmod=hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, provided)
-

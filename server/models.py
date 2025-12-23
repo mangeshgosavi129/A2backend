@@ -1,0 +1,129 @@
+from datetime import datetime
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean, Enum as SQLEnum, CheckConstraint
+from sqlalchemy.orm import relationship
+from sqlalchemy.dialects.postgresql import JSONB
+from server.database import Base
+from server.enums import TaskStatus, TaskPriority, MessageDirection, MessageChannel, Role
+# =========================================================
+# DATABASE MODELS
+# =========================================================
+class Organisation(Base):
+    __tablename__ = "organisations"
+    id = Column(Integer, primary_key=True)
+    name = Column(String(150), unique=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    users = relationship("User", back_populates="organisation")
+    clients = relationship("Client", back_populates="organisation")
+    tasks = relationship("Task", back_populates="organisation")
+    messages = relationship("Message", back_populates="organisation")
+    user_roles = relationship("UserRole", back_populates="organisation")
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organisations.id"), nullable=False)
+    name = Column(String(100), nullable=False)
+    phone = Column(String(20), unique=True, nullable=False)
+    department = Column(String(100))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    organisation = relationship("Organisation", back_populates="users")
+    auth_credential = relationship("AuthCredential", back_populates="user", uselist=False)
+    tasks_created = relationship("Task", back_populates="creator")
+    task_assignments = relationship("TaskAssignee", back_populates="user")
+    messages = relationship("Message", back_populates="user")
+    roles = relationship("UserRole", back_populates="user")
+
+class UserRole(Base):
+    __tablename__ = "user_roles"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    org_id = Column(Integer, ForeignKey("organisations.id"), nullable=False)
+    role = Column(SQLEnum(Role), nullable=False, default=Role.intern)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    user = relationship("User", back_populates="roles")
+    organisation = relationship("Organisation", back_populates="user_roles")
+
+class AuthCredential(Base):
+    __tablename__ = "auth_credentials"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
+    password_hash = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    user = relationship("User", back_populates="auth_credential")
+
+class Client(Base):
+    __tablename__ = "clients"
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organisations.id"), nullable=False)
+    name = Column(String(150), nullable=False)
+    phone = Column(String(20))
+    project_name = Column(String(150))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    organisation = relationship("Organisation", back_populates="clients")
+    tasks = relationship("Task", back_populates="client")
+
+class Task(Base):
+    __tablename__ = "tasks"
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organisations.id"), nullable=False)
+    client_id = Column(Integer, ForeignKey("clients.id"))
+    title = Column(String(200), nullable=False)
+    description = Column(Text)
+    status = Column(SQLEnum(TaskStatus), nullable=False, default=TaskStatus.assigned)
+    priority = Column(SQLEnum(TaskPriority), nullable=False, default=TaskPriority.medium)
+    deadline = Column(DateTime)
+    end_datetime = Column(DateTime)
+    checklist = Column(JSONB, default=[])
+    progress_description = Column(Text)
+    progress_percentage = Column(Integer, CheckConstraint('progress_percentage >= 0 AND progress_percentage <= 100'))
+    created_by = Column(Integer, ForeignKey("users.id"))
+    cancellation_reason = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    organisation = relationship("Organisation", back_populates="tasks")
+    client = relationship("Client", back_populates="tasks")
+    creator = relationship("User", back_populates="tasks_created")
+    assignees = relationship("TaskAssignee", back_populates="task")
+    messages = relationship("Message", back_populates="task")
+
+class TaskAssignee(Base):
+    __tablename__ = "task_assignees"
+    id = Column(Integer, primary_key=True)
+    task_id = Column(Integer, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    assigned_at = Column(DateTime, default=datetime.utcnow)
+    unassigned_at = Column(DateTime)
+    
+    task = relationship("Task", back_populates="assignees")
+    user = relationship("User", back_populates="task_assignments")
+
+    @property
+    def user_name(self):
+        return self.user.name if self.user else "Unknown"
+
+class Message(Base):
+    __tablename__ = "messages"
+    id = Column(Integer, primary_key=True)
+    org_id = Column(Integer, ForeignKey("organisations.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    task_id = Column(Integer, ForeignKey("tasks.id"))
+    direction = Column(SQLEnum(MessageDirection), nullable=False)
+    channel = Column(SQLEnum(MessageChannel), nullable=False)
+    message_text = Column(Text)
+    payload = Column(JSONB)
+    is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    user_state = Column(JSONB, default={})
+    
+    organisation = relationship("Organisation", back_populates="messages")
+    user = relationship("User", back_populates="messages")
+    task = relationship("Task", back_populates="messages")

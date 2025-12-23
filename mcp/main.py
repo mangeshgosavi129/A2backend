@@ -1,18 +1,13 @@
-import os
 import httpx
-from typing import Optional, List
-from pathlib import Path
+from typing import Optional
 from mcp.server.fastmcp import FastMCP
-from dotenv import load_dotenv
-import jwt
-from datetime import datetime, timedelta
 
-load_dotenv()
+from .config import config
 
-API_BASE = os.getenv("API_BASE", "http://localhost:8000")
+API_BASE = config.API_BASE
 mcp = FastMCP("urbounce-tasks", port=8001)
 
-SECRET_KEY = os.getenv("SECRET_KEY")
+SECRET_KEY = config.SECRET_KEY
 ALGORITHM = "HS256"
 
 def get_auth_headers(auth_token: str) -> dict:
@@ -20,7 +15,6 @@ def get_auth_headers(auth_token: str) -> dict:
     Generate auth headers using the provided valid JWT token.
     """
     if auth_token:
-        # If token doesn't start with Bearer, add it
         if not auth_token.startswith("Bearer "):
             return {"Authorization": f"Bearer {auth_token}"}
         return {"Authorization": auth_token}
@@ -220,56 +214,6 @@ async def create_and_assign_task(
             data={},
             error=f"Error creating/assigning task: {str(e)}"
         )
-
-# @mcp.tool()
-# async def create_task(
-#     title: str, 
-#     client_id: Optional[int] = None,
-#     description: Optional[str] = None, 
-#     status: str = "assigned",
-#     priority: str = "medium",
-#     deadline: Optional[str] = None,
-#     progress_percentage: int = 0
-# ):
-#     """Create task WITHOUT assignee (defaults to creator). Use create_and_assign_task if assignee is known.
-#     Status: assigned|in_progress|on_hold|completed|cancelled|overdue. Priority: high|medium|low"""
-#     try:
-#         # Filter out None values to prevent null validation errors
-#         payload = {
-#             k: v for k, v in {
-#                 "client_id": client_id,
-#                 "title": title,
-#                 "description": description,
-#                 "status": status,
-#                 "priority": priority,
-#                 "deadline": deadline,
-#                 "progress_percentage": progress_percentage
-#             }.items() if v is not None
-#         }
-        
-#         async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
-#             resp = await client.post("/tasks", json=payload)
-#             resp.raise_for_status()
-#             task_data = resp.json()
-            
-#             # Return structured response with explicit instructions
-#             return mcp_response(
-#                 success=True,
-#                 data=task_data,
-#                 instructions=f"✓ Created. Store task_id={task_data['id']}. Use update_task(task_id={task_data['id']}) to modify."
-#             )
-#     except httpx.HTTPStatusError as e:
-#         return mcp_response(
-#             success=False,
-#             data={},
-#             error=f"HTTP {e.response.status_code}: {e.response.text}"
-#         )
-#     except Exception as e:
-#         return mcp_response(
-#             success=False,
-#             data={},
-#             error=f"Error creating task: {str(e)}"
-#         )
 
 @mcp.tool()
 async def list_tasks(auth_token: str):
@@ -626,64 +570,14 @@ async def remove_checklist_item(task_id: int, index: int, auth_token: str):
         resp.raise_for_status()
         return resp.json()
 
-# =========================================================
-# MESSAGE ENDPOINTS
-# =========================================================
-
-# @mcp.tool()#comment
-# async def create_message(
-#     direction: str,
-#     channel: str,
-#     user_id: Optional[int] = None,
-#     task_id: Optional[int] = None,
-#     message_text: Optional[str] = None,
-#     payload: Optional[dict] = None
-# ):
-#     """Create a message. Direction: in, out, system. Channel: whatsapp, web, system."""
-#     async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
-#         resp = await client.post(
-#             "/messages",
-#             json={
-#                 "user_id": user_id,
-#                 "task_id": task_id,
-#                 "direction": direction,
-#                 "channel": channel,
-#                 "message_text": message_text,
-#                 "payload": payload
-#             }
-#         )
-#         resp.raise_for_status()
-#         return resp.json()
-
-# @mcp.tool()#comment
-# async def list_messages(
-#     user_id: Optional[int] = None,
-#     task_id: Optional[int] = None,
-#     direction: Optional[str] = None,
-#     channel: Optional[str] = None
-# ):
-#     """List messages with optional filters"""
-#     params = {
-#         k: v for k, v in {
-#             "user_id": user_id,
-#             "task_id": task_id,
-#             "direction": direction,
-#             "channel": channel
-#         }.items() if v is not None
-#     }
-#     async with httpx.AsyncClient(base_url=API_BASE, timeout=30, headers=AUTH_HEADER) as client:
-#         resp = await client.get("/messages", params=params)
-#         resp.raise_for_status()
-#         return resp.json()
-
 if __name__ == "__main__":
     import sys
     
     # Check if we want HTTP mode
     if "--http" in sys.argv:
         # Run as HTTP server
-        port = int(os.getenv("MCP_PORT", "8001"))
-        host = os.getenv("MCP_HOST", "0.0.0.0")
+        port = config.MCP_PORT
+        host = config.MCP_HOST
         
         print(f"Starting MCP HTTP server on {host}:{port}")
         mcp.run(transport="sse")

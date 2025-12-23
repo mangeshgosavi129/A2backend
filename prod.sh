@@ -19,6 +19,7 @@ mkdir -p "$LOG_DIR"
 
 echo "Starting main FastAPI server..."
 nohup uvicorn server.main:app --host 0.0.0.0 --port $MAIN_PORT \
+    --workers 4 \
     > "$LOG_DIR/main.out.log" \
     2> "$LOG_DIR/main.err.log" &
 SERVER_PID=$!

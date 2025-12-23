@@ -4,3 +4,8 @@ __pycache__
 venv
 A2-Taskbot-Testing.pem
 frontend
+todo.md
+GEMINI.md
+.env.prod
+.env.dev
+.temp
