@@ -3,7 +3,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 import jwt
 from server.database import SessionLocal
-from server.models import User, UserRole
+from server.models import User, UserRole, TokenBlacklist
 from server.enums import Role
 from server.config import config
 from sqlalchemy import and_
@@ -21,42 +21,34 @@ def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
 ) -> User:
-    # Basic sanity checks
     if not config.SECRET_KEY:
-        # Fatal server misconfiguration
-        print("ERROR: SECRET_KEY is not set")
         raise HTTPException(status_code=500, detail="Server misconfiguration: SECRET_KEY not set")
 
-    try:
-        # credentials.credentials should already be the token string, but some clients
-        # may accidentally send the entire header value including 'Bearer'.
-        token = credentials.credentials
-        if token.startswith("Bearer "):
-            token = token.split(" ", 1)[1]
-            print("DEBUG: stripped 'Bearer ' prefix, token now:", token)
+    token = credentials.credentials
+    
+    blacklisted = db.query(TokenBlacklist).filter(TokenBlacklist.token == token).first()
+    if blacklisted:
+        print(f"DEBUG: Blacklisted token rejected: {token[:20]}...")
+        raise HTTPException(status_code=401, detail="Token has been invalidated (logged out)")
 
-        # decode the JWT
+    try:
         payload = jwt.decode(
             token,
             config.SECRET_KEY,
             algorithms=[config.ALGORITHM],
             options={"verify_signature": True, "verify_exp": True, "verify_sub": False}
         )
-        # print("DEBUG: JWT payload:", payload)
 
         sub = payload.get("sub")
         if sub is None:
             print("DEBUG: 'sub' missing in token payload")
             raise HTTPException(status_code=401, detail="Invalid token: subject missing")
         
-        # Verify org_id match if present in token (optional security check)
         token_org_id = payload.get("org_id")
 
-        # allow both numeric strings and integers
         try:
             user_id = int(sub)
         except (TypeError, ValueError):
-            # not an integer-like sub; provide a clear error for debugging
             print(f"DEBUG: token 'sub' is not an integer: {sub!r}")
             raise HTTPException(status_code=401, detail="Invalid token: subject is not an integer id")
 
@@ -65,6 +57,9 @@ def get_current_user(
     except jwt.InvalidTokenError as e:
         print("DEBUG: token decode error:", repr(e))
         raise HTTPException(status_code=401, detail="Invalid token")
+    except HTTPException:
+        # Re-raise HTTPExceptions (like 'subject missing' or 'not an integer')
+        raise
     except Exception as e:
         print("DEBUG: unexpected error while validating token:", repr(e))
         raise HTTPException(status_code=401, detail="Invalid token")

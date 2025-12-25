@@ -4,14 +4,14 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from server.schemas import UserResponse, UserUpdate
 from server.models import User
-from server.dependencies import get_db, get_current_user
+from server.dependencies import get_db, get_current_user, get_current_user_with_role
 
 router = APIRouter()
 
 # =========================================================
 # USER ENDPOINTS
 # =========================================================
-@router.get("/users", response_model=List[UserResponse])
+@router.get("/", response_model=List[UserResponse])
 def get_users(
     name: Optional[str] = Query(None),
     department: Optional[str] = Query(None),
@@ -34,7 +34,7 @@ def get_users(
         
     return users
 
-@router.get("/users/{user_id}", response_model=UserResponse)
+@router.get("/{user_id}", response_model=UserResponse)
 def get_user(
     user_id: int,
     db: Session = Depends(get_db),
@@ -51,7 +51,7 @@ def get_user(
     
     return user
 
-@router.put("/users/{user_id}", response_model=UserResponse)
+@router.put("/{user_id}", response_model=UserResponse)
 def update_user(
     user_id: int,
     user_data: UserUpdate,
@@ -81,7 +81,7 @@ def update_user(
     db.refresh(user)
     return user
 
-@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_user(
     user_id: int,
     context = Depends(get_current_user_with_role),

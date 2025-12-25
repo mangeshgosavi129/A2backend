@@ -2,9 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from server.schemas import OrganisationResponse, RoleAssignment
 from server.models import Organisation, UserRole
-from server.dependencies import get_db, get_current_user
+from server.dependencies import get_db, get_current_user, get_current_user_with_role
 from server.permissions import can_assign_roles, check_org_access
-from server.dependencies import get_current_user_with_role
 from typing import List
 from server.models import User
 
@@ -13,7 +12,7 @@ router = APIRouter()
 # =========================================================
 # ORGANISATION ENDPOINTS
 # =========================================================
-@router.get("/organisations/{org_id}", response_model=OrganisationResponse)
+@router.get("/{org_id}", response_model=OrganisationResponse)
 def get_organisation(
     org_id: int,
     db: Session = Depends(get_db),
@@ -29,7 +28,7 @@ def get_organisation(
     
     return org
 
-@router.get("/organisations", response_model=List[OrganisationResponse])
+@router.get("/", response_model=List[OrganisationResponse])
 def list_organisations(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -41,7 +40,7 @@ def list_organisations(
 # =========================================================
 # ROLE MANAGEMENT ENDPOINTS
 # =========================================================
-@router.post("/organisations/{org_id}/roles", status_code=status.HTTP_200_OK)
+@router.post("/{org_id}/roles", status_code=status.HTTP_200_OK)
 def assign_role(
     org_id: int,
     role_assignment: RoleAssignment,
@@ -88,7 +87,7 @@ def assign_role(
     db.commit()
     return {"message": f"Role updated to {role_assignment.role.value} for user {role_assignment.user_id}"}
 
-@router.get("/organisations/{org_id}/roles")
+@router.get("/{org_id}/roles")
 def list_org_roles(
     org_id: int,
     context = Depends(get_current_user_with_role),

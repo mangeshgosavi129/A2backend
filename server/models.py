@@ -127,3 +127,10 @@ class Message(Base):
     organisation = relationship("Organisation", back_populates="messages")
     user = relationship("User", back_populates="messages")
     task = relationship("Task", back_populates="messages")
+
+class TokenBlacklist(Base):
+    __tablename__ = "token_blacklist"
+    id = Column(Integer, primary_key=True)
+    token = Column(String(500), index=True, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)

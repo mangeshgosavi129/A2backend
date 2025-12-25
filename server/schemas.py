@@ -1,7 +1,7 @@
 from typing import List, Optional
 from datetime import datetime
-from pydantic import BaseModel, validator
-from server.models import TaskStatus, TaskPriority, MessageDirection, MessageChannel
+from pydantic import BaseModel, field_validator
+from server.models import TaskStatus, TaskPriority, MessageDirection, MessageChannel, Role
 
 # =========================================================
 # PYDANTIC SCHEMAS
@@ -27,10 +27,24 @@ class UserCreate(BaseModel):
     department: Optional[str] = None
     org_name: Optional[str] = None  # For creating new org
     org_id: Optional[int] = None    # For joining existing org
+    
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v: str) -> str:
+        if not v.isdigit() or len(v) != 12:
+            raise ValueError('Phone number must be exactly 12 digits (2 for country code, 10 for number)')
+        return v
 
 class UserLogin(BaseModel):
     phone: str
     password: str
+
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v: str) -> str:
+        if not v.isdigit() or len(v) != 12:
+            raise ValueError('Phone number must be exactly 12 digits (2 for country code, 10 for number)')
+        return v
 
 class UserUpdate(BaseModel):
     name: Optional[str] = None
@@ -149,7 +163,8 @@ class TaskResponse(BaseModel):
     updated_at: datetime
     assignees: List[TaskAssigneeResponse] = []
     
-    @validator('assignees', pre=True, always=True)
+    @field_validator('assignees', mode='before')
+    @classmethod
     def filter_active_assignees(cls, v):
         if not v:
             return []

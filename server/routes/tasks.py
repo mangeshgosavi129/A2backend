@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List
 from datetime import datetime, timedelta
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -10,14 +10,14 @@ from server.schemas import (
     TaskAssigneeResponse, ChecklistItem, ChecklistUpdate, ChecklistRemove
 )
 from server.models import Task, User, TaskAssignee, TaskStatus
-from server.dependencies import get_db, get_current_user
+from server.dependencies import get_db, get_current_user, get_current_user_with_role
 
 router = APIRouter()
 
 # =========================================================
 # TASK ENDPOINTS
 # =========================================================
-@router.post("/tasks", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
 def create_task(
     task_data: TaskCreate,
     context = Depends(get_current_user_with_role),
@@ -56,7 +56,7 @@ def create_task(
     db.refresh(task)
     return task
 
-@router.get("/tasks", response_model=List[TaskResponse])
+@router.get("/", response_model=List[TaskResponse])
 def get_tasks(
     context = Depends(get_current_user_with_role),
     db: Session = Depends(get_db)
@@ -83,7 +83,7 @@ def get_tasks(
     tasks = query.all()
     return tasks
 
-@router.get("/tasks/{task_id}", response_model=TaskResponse)
+@router.get("/{task_id}", response_model=TaskResponse)
 def get_task(
     task_id: int,
     db: Session = Depends(get_db),
@@ -100,7 +100,7 @@ def get_task(
         raise HTTPException(status_code=404, detail="Task not found")
     return task
 
-@router.put("/tasks/{task_id}", response_model=TaskResponse)
+@router.put("/{task_id}", response_model=TaskResponse)
 def update_task(
     task_id: int,
     task_data: TaskUpdate,
@@ -181,7 +181,7 @@ def update_task(
     
     return task
 
-@router.post("/tasks/{task_id}/cancel", response_model=TaskResponse)
+@router.post("/{task_id}/cancel", response_model=TaskResponse)
 def cancel_task(
     task_id: int,
     cancel_data: TaskCancel,
@@ -247,7 +247,7 @@ def cancel_task(
 # =========================================================
 # TASK ASSIGNMENT ENDPOINTS
 # =========================================================
-@router.post("/tasks/{task_id}/assign")
+@router.post("/{task_id}/assign")
 def assign_task(
     task_id: int,
     assign_data: TaskAssign,
@@ -311,7 +311,7 @@ def assign_task(
     
     return {"message": "Task assigned successfully"}
 
-@router.post("/tasks/{task_id}/assign-multiple")
+@router.post("/{task_id}/assign-multiple")
 def assign_task_multiple(
     task_id: int,
     assign_data: TaskAssignMultiple,
@@ -368,7 +368,7 @@ def assign_task_multiple(
     db.commit()
     return {"message": "Task assigned to multiple users successfully"}
 
-@router.post("/tasks/{task_id}/unassign")
+@router.post("/{task_id}/unassign")
 def unassign_task(
     task_id: int,
     unassign_data: TaskUnassign,
@@ -403,7 +403,7 @@ def unassign_task(
     db.commit()
     return {"message": "User unassigned successfully"}
 
-@router.get("/tasks/{task_id}/assignments", response_model=List[TaskAssigneeResponse])
+@router.get("/{task_id}/assignments", response_model=List[TaskAssigneeResponse])
 def get_task_assignments(
     task_id: int,
     db: Session = Depends(get_db),
@@ -424,7 +424,7 @@ def get_task_assignments(
 # =========================================================
 # CHECKLIST ENDPOINTS
 # =========================================================
-@router.post("/tasks/{task_id}/checklist/add", response_model=TaskResponse)
+@router.post("/{task_id}/checklist/add", response_model=TaskResponse)
 def add_checklist_item(
     task_id: int,
     item: ChecklistItem,
@@ -456,7 +456,7 @@ def add_checklist_item(
     db.refresh(task)
     return task
 
-@router.put("/tasks/{task_id}/checklist/update", response_model=TaskResponse)
+@router.put("/{task_id}/checklist/update", response_model=TaskResponse)
 def update_checklist_item(
     task_id: int,
     update_data: ChecklistUpdate,
@@ -495,7 +495,7 @@ def update_checklist_item(
     db.refresh(task)
     return task
 
-@router.delete("/tasks/{task_id}/checklist/remove", response_model=TaskResponse)
+@router.delete("/{task_id}/checklist/remove", response_model=TaskResponse)
 def remove_checklist_item(
     task_id: int,
     remove_data: ChecklistRemove,

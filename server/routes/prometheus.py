@@ -22,7 +22,7 @@ EXCEPTION_COUNT = Counter(
     ["endpoint"]
 )
 
-@router.get("/metrics")
+@router.get("/")
 def metrics():
     data = generate_latest()
     return Response(data, media_type=CONTENT_TYPE_LATEST)

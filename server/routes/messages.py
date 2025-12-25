@@ -10,7 +10,7 @@ router = APIRouter()
 # =========================================================
 # MESSAGE ENDPOINTS
 # =========================================================
-@router.post("/messages", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
 def create_message(
     message_data: MessageCreate,
     db: Session = Depends(get_db),
@@ -23,7 +23,7 @@ def create_message(
     db.refresh(message)
     return message
 
-@router.get("/messages", response_model=List[MessageResponse])
+@router.get("/", response_model=List[MessageResponse])
 def get_messages(
     user_id: Optional[int] = Query(None),
     task_id: Optional[int] = Query(None),

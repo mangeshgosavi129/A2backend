@@ -4,14 +4,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from server.schemas import ClientResponse, ClientCreate, ClientUpdate
 from server.models import Client, User
-from server.dependencies import get_db, get_current_user
+from server.dependencies import get_db, get_current_user, get_current_user_with_role
 
 router = APIRouter()
 
 # =========================================================
 # CLIENT ENDPOINTS
 # =========================================================
-@router.post("/clients", response_model=ClientResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=ClientResponse, status_code=status.HTTP_201_CREATED)
 def create_client(
     client_data: ClientCreate,
     context = Depends(get_current_user_with_role),
@@ -33,16 +33,15 @@ def create_client(
     db.refresh(client)
     return client
 
-@router.get("/clients", response_model=List[ClientResponse])
+@router.get("/", response_model=List[ClientResponse])
 def get_clients(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # Filter by org_id for tenant isolation
     clients = db.query(Client).filter(Client.org_id == current_user.org_id).all()
     return clients
 
-@router.get("/clients/{client_id}", response_model=ClientResponse)
+@router.get("/{client_id}", response_model=ClientResponse)
 def get_client(
     client_id: int,
     db: Session = Depends(get_db),
@@ -53,7 +52,7 @@ def get_client(
         raise HTTPException(status_code=404, detail="Client not found")
     return client
 
-@router.put("/clients/{client_id}", response_model=ClientResponse)
+@router.put("/{client_id}", response_model=ClientResponse)
 def update_client(
     client_id: int,
     client_data: ClientUpdate,
@@ -81,7 +80,7 @@ def update_client(
     db.refresh(client)
     return client
 
-@router.delete("/clients/{client_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{client_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_client(
     client_id: int,
     context = Depends(get_current_user_with_role),
