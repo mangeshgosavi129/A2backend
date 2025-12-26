@@ -4,12 +4,14 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from .queue import push_to_queue
 from .security import verify_webhook
 import logging
+from mangum import Mangum
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="WhatsApp Webhook")
+handler = Mangum(app)
 
 @app.get("/health")
 async def health() -> Mapping[str, Any]:
@@ -38,4 +40,3 @@ async def webhook_receive(request: Request) -> JSONResponse:
     content, status = push_to_queue(body, headers, raw_body)
     print(f"Content from webhook_receive: {content}")
     return JSONResponse(content, status_code=status)
-

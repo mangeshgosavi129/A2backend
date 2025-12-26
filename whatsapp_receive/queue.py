@@ -29,6 +29,7 @@ def push_to_queue(
             QueueUrl=config.QUEUE_URL,
             MessageBody=json.dumps(body)
         )
+        logging.info("Successfully pushed to SQS")
     except Exception as e:
         logging.error(f"Failed to push to SQS: {str(e)}")
         # You may want to return a 500 here if the queue is critical

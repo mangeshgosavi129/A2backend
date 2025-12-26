@@ -9,3 +9,6 @@ GEMINI.md
 .env.prod
 .env.dev
 .temp
+.pytest_cache
+*.zip
+build

@@ -1,18 +1,7 @@
 import os
-from pathlib import Path
 from dotenv import load_dotenv
-from typing import Optional
 
-# Resolve paths
-current_file_path = Path(__file__).resolve()
-root_dir = current_file_path.parent.parent
-env_path = root_dir / ".env.dev"
-
-# Load env variables
-if env_path.exists():
-    load_dotenv(dotenv_path=env_path, override=True)
-else:
-    print(f"Warning: .env.dev file not found at {env_path}")
+load_dotenv()#directly load from lambda environment and not the .env file
 
 class WhatsAppReceiveConfig:
     def __init__(self) -> None:
