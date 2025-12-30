@@ -1,8 +1,8 @@
 import httpx
 from typing import Optional
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
-from .config import config
+from config import config
 
 API_BASE = config.API_BASE
 mcp = FastMCP("urbounce-tasks", port=8001)
@@ -576,8 +576,8 @@ if __name__ == "__main__":
     # Check if we want HTTP mode
     if "--http" in sys.argv:
         # Run as HTTP server
-        port = config.MCP_PORT
-        host = config.MCP_HOST
+        port = "8001"
+        host = "127.0.0.1"
         
         print(f"Starting MCP HTTP server on {host}:{port}")
         mcp.run(transport="sse")

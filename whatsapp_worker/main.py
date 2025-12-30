@@ -1,12 +1,12 @@
-from whatsapp_worker.processors.apis import (store_message,get_user_details,check_idempotency)
+from .processors.apis import (store_message, get_user_details, check_idempotency)
 import logging
 import signal
 from typing import Mapping, Tuple
 from .config import config
 from .processors.llm import generate_llm_response
-from whatsapp_worker.send import send_whatsapp_text
-from whatsapp_worker.processors.audio import process_audio_sync
-from whatsapp_worker.scheduler import start_scheduler, stop_scheduler
+from .send import send_whatsapp_text
+from .processors.audio import process_audio_sync
+from .scheduler import start_scheduler, stop_scheduler
 import boto3
 import json
 import time
